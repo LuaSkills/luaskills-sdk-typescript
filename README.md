@@ -200,6 +200,30 @@ $env:LUASKILLS_RUNTIME_ROOT = "D:\runtime\luaskills"
 node node_modules\@luaskills\sdk\examples\basic.mjs
 ```
 
+For source-tree examples, use the npm scripts:
+
+源码仓库中的示例可以使用 npm scripts 运行：
+
+```powershell
+npm run example:basic
+npm run example:call
+npm run example:query
+npm run example:lifecycle
+npm run example:provider-callback
+```
+
+The query and lifecycle examples use the bundled fixture skill at `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`. Install runtime assets into that root first:
+
+query 与 lifecycle 示例使用内置夹具 skill：`examples/fixture-runtime/user_skills/demo-standard-ffi-skill`。请先把 runtime 资产安装到该 root：
+
+```powershell
+npx @luaskills/sdk install-runtime --database none --runtime-root .\examples\fixture-runtime
+```
+
+See `examples/README.md` for the full example index and runtime notes.
+
+完整示例索引与 runtime 注意事项见 `examples/README.md`。
+
 For local repository development, run `npm run build` first. The examples still import `@luaskills/sdk`; Node resolves the current package by its package name when run inside the package.
 
 本地仓库开发时请先运行 `npm run build`。示例仍然导入 `@luaskills/sdk`；在包目录内运行时，Node 会按包名解析当前 package。

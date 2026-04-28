@@ -17,6 +17,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "example:basic": "node examples/basic.mjs",
+    "example:call": "node examples/call.mjs",
+    "example:lifecycle": "node examples/lifecycle.mjs",
+    "example:provider-callback": "node examples/provider-callback.mjs",
+    "example:query": "node examples/query.mjs",
     "prepack": "npm run build"
   },
   "keywords": [
