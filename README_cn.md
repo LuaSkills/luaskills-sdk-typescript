@@ -323,6 +323,8 @@ SDK 覆盖公共 JSON FFI 主要入口：
 
 ## 发布
 
+发布版本记录在 `VERSION`。发布前请保持 `VERSION`、`package.json` 与 `package-lock.json` 一致。
+
 发布前执行：
 
 ```bash
@@ -339,3 +341,10 @@ npm pack --dry-run
 - `bin`: `dist/cli.js`
 
 每次 npm publish 都必须使用新的 patch 版本；已发布版本不能覆盖。
+
+npm 发布成功后，手动运行 GitHub Actions 里的 **Examples Release** 工作流。它会读取 `VERSION`，从 npm 安装 `@luaskills/sdk@{VERSION}`，安装 LuaSkills runtime 资产，运行示例冒烟测试，然后创建或更新 `examples-v{VERSION}` GitHub Release，并上传：
+
+- `luaskills-sdk-typescript-examples-{VERSION}.zip`
+- `luaskills-sdk-typescript-examples-{VERSION}.zip.sha256`
+
+示例 release tag 故意使用 `examples-v` 前缀，因为它是示例资产发布，不是 SDK 包版本。

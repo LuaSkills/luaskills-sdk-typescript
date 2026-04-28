@@ -55,3 +55,9 @@ node .\examples\provider-callback.mjs
 ## Fixture Skill
 
 夹具 skill 位于 `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`。它故意放在 USER 层，这样委托查询示例不需要 System 权限也能看到它。
+
+## 示例发布包
+
+仓库工作流 **Examples Release** 会在匹配的 npm 包发布后生成 `luaskills-sdk-typescript-examples-{VERSION}.zip`。工作流会从 npm 安装 `@luaskills/sdk@{VERSION}` 并运行示例，通过后再上传资产。
+
+release tag 使用 `examples-v{VERSION}`，因此示例资产与 SDK 包版本保持分离。

@@ -1,19 +1,20 @@
 {
   "name": "@luaskills/sdk",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "TypeScript and Node.js SDK for integrating the LuaSkills runtime through the JSON FFI surface.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "luaskills": "dist/cli.js"
+    "luaskills": "./dist/cli.js"
   },
   "files": [
     "dist",
     "examples",
     "src",
     "README.md",
-    "README_cn.md"
+    "README_cn.md",
+    "VERSION"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

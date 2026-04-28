@@ -55,3 +55,9 @@ node .\examples\provider-callback.mjs
 ## Fixture Skill
 
 The fixture skill is stored at `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`. It intentionally lives in USER so delegated-query examples can see it without System authority.
+
+## Release Package
+
+The repository workflow **Examples Release** creates `luaskills-sdk-typescript-examples-{VERSION}.zip` after the matching npm package is published. The workflow installs `@luaskills/sdk@{VERSION}` from npm and runs the examples before uploading the asset.
+
+The release tag is `examples-v{VERSION}` so example assets stay separate from SDK package versions.

@@ -1,0 +1,165 @@
+name: Examples Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  examples-release:
+    name: Build and publish examples release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid VERSION value: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=examples-v$version" >> "$GITHUB_OUTPUT"
+          echo "package_name=luaskills-sdk-typescript-examples-$version" >> "$GITHUB_OUTPUT"
+          echo "asset_name=luaskills-sdk-typescript-examples-$version.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Create standalone examples package
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE_NAME: ${{ steps.version.outputs.package_name }}
+        run: |
+          set -euo pipefail
+          package_root="target/examples-release/$PACKAGE_NAME"
+          mkdir -p "$package_root"
+          cp LICENSE README.md README_cn.md "$package_root/"
+          cp -R examples "$package_root/examples"
+          cat > "$package_root/package.json" <<JSON
+          {
+            "private": true,
+            "type": "module",
+            "scripts": {
+              "install-runtime": "luaskills install-runtime --database none --runtime-root examples/fixture-runtime",
+              "example:basic": "node examples/basic.mjs",
+              "example:query": "node examples/query.mjs",
+              "example:call": "node examples/call.mjs",
+              "example:lifecycle": "node examples/lifecycle.mjs",
+              "example:provider-callback": "node examples/provider-callback.mjs"
+            },
+            "dependencies": {
+              "@luaskills/sdk": "$VERSION"
+            }
+          }
+          JSON
+          cat > "$package_root/EXAMPLES_RELEASE.md" <<MARKDOWN
+          # LuaSkills TypeScript SDK Examples $VERSION
+
+          English documentation is the default documentation. For Chinese, see README_cn.md and examples/README_cn.md.
+
+          These examples install and use the published npm package:
+
+          \`\`\`bash
+          npm install
+          npm run install-runtime
+          npm run example:basic
+          npm run example:query
+          \`\`\`
+
+          Main repository: https://github.com/LuaSkills/luaskills
+          MARKDOWN
+
+      - name: Install published SDK and runtime assets
+        shell: bash
+        working-directory: target/examples-release/${{ steps.version.outputs.package_name }}
+        run: |
+          set -euo pipefail
+          npm install
+          npm run install-runtime
+
+      - name: Run published-package smoke examples
+        shell: bash
+        working-directory: target/examples-release/${{ steps.version.outputs.package_name }}
+        env:
+          LUASKILLS_RUNTIME_ROOT: ${{ github.workspace }}/target/examples-release/${{ steps.version.outputs.package_name }}/examples/fixture-runtime
+          LUASKILLS_EXAMPLE_RUNTIME_ROOT: ${{ github.workspace }}/target/examples-release/${{ steps.version.outputs.package_name }}/examples/fixture-runtime
+        run: |
+          set -euo pipefail
+          npm run example:basic
+          npm run example:query
+          npm run example:call
+          npm run example:lifecycle
+          npm run example:provider-callback
+
+      - name: Package examples asset
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.version.outputs.package_name }}
+          ASSET_NAME: ${{ steps.version.outputs.asset_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p target/release-assets
+          (
+            cd target/examples-release
+            zip -qr "../release-assets/$ASSET_NAME" "$PACKAGE_NAME"
+          )
+          (
+            cd target/release-assets
+            sha256sum "$ASSET_NAME" > "$ASSET_NAME.sha256"
+          )
+
+      - name: Write release notes
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cat > target/release-assets/RELEASE_NOTES.md <<MARKDOWN
+          ## LuaSkills TypeScript SDK Examples $VERSION
+
+          This release contains a standalone examples package for the published npm package \`@luaskills/sdk@$VERSION\`.
+
+          The package was smoke-tested by installing the published SDK, installing LuaSkills runtime assets, and running the bundled examples.
+
+          Main repository: https://github.com/LuaSkills/luaskills
+
+          ## 中文说明
+
+          本 Release 包含面向已发布 npm 包 \`@luaskills/sdk@$VERSION\` 的独立示例包。
+
+          工作流已通过安装正式 SDK、安装 LuaSkills runtime 资产并运行内置示例完成冒烟验证。
+          MARKDOWN
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ASSET_NAME: ${{ steps.version.outputs.asset_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "target/release-assets/$ASSET_NAME" \
+              "target/release-assets/$ASSET_NAME.sha256" \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              "target/release-assets/$ASSET_NAME" \
+              "target/release-assets/$ASSET_NAME.sha256" \
+              --target "$GITHUB_SHA" \
+              --title "LuaSkills TypeScript SDK Examples $VERSION" \
+              --notes-file target/release-assets/RELEASE_NOTES.md
+          fi

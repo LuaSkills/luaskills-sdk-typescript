@@ -323,6 +323,8 @@ The SDK covers the public JSON FFI surface:
 
 ## Publishing
 
+The release version is stored in `VERSION`. Keep `VERSION`, `package.json`, and `package-lock.json` aligned before publishing.
+
 Before publishing:
 
 ```bash
@@ -339,3 +341,10 @@ The package exposes:
 - `bin`: `dist/cli.js`
 
 Use a new patch version for every npm publish. Published versions cannot be overwritten.
+
+After npm publishes successfully, run the GitHub Actions workflow **Examples Release** manually. It reads `VERSION`, installs `@luaskills/sdk@{VERSION}` from npm, installs LuaSkills runtime assets, runs the examples, then creates or updates the `examples-v{VERSION}` GitHub Release with:
+
+- `luaskills-sdk-typescript-examples-{VERSION}.zip`
+- `luaskills-sdk-typescript-examples-{VERSION}.zip.sha256`
+
+The examples release tag intentionally uses the `examples-v` prefix because it is an examples asset release, not an SDK package version.
