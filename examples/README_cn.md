@@ -40,6 +40,12 @@ node .\examples\query.mjs
 node .\examples\call.mjs
 ```
 
+`host-tool-callback.mjs` 注册一个 mock `model.embed` 宿主工具 callback，并从内联 Lua 调用 `vulcan.host.list`、`vulcan.host.has` 与 `vulcan.host.call`。
+
+```powershell
+node .\examples\host-tool-callback.mjs
+```
+
 `lifecycle.mjs` 演示通过普通 Skills plane 执行 `disable` 与 `enable`。
 
 ```powershell

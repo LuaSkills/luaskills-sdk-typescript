@@ -40,6 +40,12 @@ node .\examples\query.mjs
 node .\examples\call.mjs
 ```
 
+`host-tool-callback.mjs` registers a mock `model.embed` host-tool callback and exercises `vulcan.host.list`, `vulcan.host.has`, and `vulcan.host.call` from inline Lua.
+
+```powershell
+node .\examples\host-tool-callback.mjs
+```
+
 `lifecycle.mjs` demonstrates `disable` and `enable` through the ordinary Skills plane.
 
 ```powershell

@@ -9,7 +9,15 @@ export {
   defaultSpaceControllerOptions,
   type RenderHelpOptions,
 } from "./client.js";
-export { LuaSkillsError, LuaSkillsJsonFfi, resolveLibraryPath, type JsonProviderCallback } from "./ffi.js";
+export {
+  LuaSkillsError,
+  LuaSkillsJsonFfi,
+  resolveLibraryPath,
+  type HostToolJsonAction,
+  type HostToolJsonCallback,
+  type HostToolJsonRequest,
+  type JsonProviderCallback,
+} from "./ffi.js";
 export { RuntimeRoots } from "./roots.js";
 export * from "./runtime-assets.js";
 export * from "./types.js";

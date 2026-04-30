@@ -12,7 +12,7 @@ import type { LuaRuntimeHostOptions } from "./types.js";
  * Default LuaSkills release tag used by SDK runtime installation.
  * SDK 运行时安装使用的默认 LuaSkills 发布标签。
  */
-export const DEFAULT_LUASKILLS_VERSION = "v0.2.2";
+export const DEFAULT_LUASKILLS_VERSION = "v0.2.3";
 
 /**
  * Default vldb-controller release tag used by SDK runtime installation.

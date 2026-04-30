@@ -73,10 +73,55 @@ type JsonInputFunction = (input: FfiBorrowedBuffer) => FfiOwnedBuffer;
 type JsonNoInputFunction = () => FfiOwnedBuffer;
 
 /**
+ * Shared host-side JSON callback shape implemented by SDK callers.
+ * 由 SDK 调用方实现的共享宿主侧 JSON callback 形状。
+ */
+type JsonCallback<Request extends JsonValue = JsonValue> = (request: Request) => JsonValue;
+
+/**
  * Host-side JSON provider callback implemented by SDK callers.
  * 由 SDK 调用方实现的宿主侧 JSON provider callback。
  */
-export type JsonProviderCallback = (request: JsonValue) => JsonValue;
+export type JsonProviderCallback = JsonCallback;
+
+/**
+ * Host-tool bridge action names emitted by `vulcan.host.*`.
+ * `vulcan.host.*` 发出的宿主工具桥接动作名称。
+ */
+export type HostToolJsonAction = "list" | "has" | "call";
+
+/**
+ * Host-tool bridge request delivered to the SDK callback.
+ * 传递给 SDK callback 的宿主工具桥接请求。
+ */
+export type HostToolJsonRequest = {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的前向兼容 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * Requested host-tool bridge action.
+   * 请求的宿主工具桥接动作。
+   */
+  action: HostToolJsonAction;
+  /**
+   * Optional host tool name for `has` and `call` actions.
+   * `has` 与 `call` 动作使用的可选宿主工具名称。
+   */
+  tool_name?: string | null;
+  /**
+   * JSON payload converted from the Lua table argument.
+   * 从 Lua table 参数转换得到的 JSON 载荷。
+   */
+  args: JsonValue;
+};
+
+/**
+ * Host-side tool bridge JSON callback implemented by SDK callers.
+ * 由 SDK 调用方实现的宿主工具桥接 JSON callback。
+ */
+export type HostToolJsonCallback = JsonCallback<HostToolJsonRequest>;
 
 /**
  * Function shape used by luaskills_ffi_buffer_clone.
@@ -100,14 +145,14 @@ type JsonProviderSetterFunction = (
 ) => number;
 
 /**
- * Native provider callback slot names managed by this bridge.
- * 当前桥接管理的原生 provider callback 槽位名称。
+ * Native JSON callback slot names managed by this bridge.
+ * 当前桥接管理的原生 JSON callback 槽位名称。
  */
-type JsonProviderKind = "sqlite" | "lancedb";
+type JsonCallbackKind = "sqlite" | "lancedb" | "host-tool";
 
 /**
- * Module-level provider callback slot state matching native process-wide slots.
- * 与原生进程级槽位对齐的模块级 provider callback 槽位状态。
+ * Module-level JSON callback slot state matching native process-wide slots.
+ * 与原生进程级槽位对齐的模块级 JSON callback 槽位状态。
  */
 interface JsonProviderSlotState {
   /**
@@ -128,8 +173,8 @@ interface JsonProviderSlotState {
 }
 
 /**
- * Shared JSON provider slot registry for this Node.js process.
- * 当前 Node.js 进程内共享的 JSON provider 槽位注册表。
+ * Shared JSON callback slot registry for this Node.js process.
+ * 当前 Node.js 进程内共享的 JSON callback 槽位注册表。
  */
 const JSON_PROVIDER_SLOTS = new Map<string, JsonProviderSlotState>();
 
@@ -304,6 +349,18 @@ export class LuaSkillsJsonFfi {
   }
 
   /**
+   * Register or clear the host-tool JSON callback.
+   * 注册或清理宿主工具 JSON callback。
+   */
+  setHostToolJsonCallback(callback: HostToolJsonCallback | null): void {
+    this.setJsonProviderCallback(
+      "host-tool",
+      "luaskills_ffi_set_host_tool_json_callback",
+      callback,
+    );
+  }
+
+  /**
    * Clear the SQLite JSON provider callback slot.
    * 清理 SQLite JSON provider callback 槽位。
    */
@@ -317,6 +374,14 @@ export class LuaSkillsJsonFfi {
    */
   clearLanceDbProviderJsonCallback(): void {
     this.setLanceDbProviderJsonCallback(null);
+  }
+
+  /**
+   * Clear the host-tool JSON callback slot.
+   * 清理宿主工具 JSON callback 槽位。
+   */
+  clearHostToolJsonCallback(): void {
+    this.setHostToolJsonCallback(null);
   }
 
   /**
@@ -348,10 +413,10 @@ export class LuaSkillsJsonFfi {
    * Register or clear one concrete JSON provider callback slot.
    * 注册或清理一个具体 JSON provider callback 槽位。
    */
-  private setJsonProviderCallback(
-    kind: JsonProviderKind,
+  private setJsonProviderCallback<Request extends JsonValue = JsonValue>(
+    kind: JsonCallbackKind,
     functionName: string,
-    callback: JsonProviderCallback | null,
+    callback: JsonCallback<Request> | null,
   ): void {
     const slotKey = this.jsonProviderSlotKey(kind);
     const previousSlot = JSON_PROVIDER_SLOTS.get(slotKey);
@@ -368,7 +433,7 @@ export class LuaSkillsJsonFfi {
     const registeredCallback = koffi.register(
       (requestJson: FfiBorrowedBuffer, _userData: unknown, responseOut: unknown, errorOut: unknown): number => {
         try {
-          const request = this.parseBorrowedJson(requestJson);
+          const request = this.parseBorrowedJson(requestJson) as Request;
           const response = callback(request);
           this.cloneOwnedBuffer(serializeProviderJson(response), responseOut);
           return 0;
@@ -454,10 +519,10 @@ export class LuaSkillsJsonFfi {
   }
 
   /**
-   * Build a process-local provider slot key for one library path and provider kind.
-   * 为单个动态库路径和 provider 类型构造进程内 provider 槽位键。
+   * Build a process-local JSON callback slot key for one library path and callback kind.
+   * 为单个动态库路径和 callback 类型构造进程内 JSON callback 槽位键。
    */
-  private jsonProviderSlotKey(kind: JsonProviderKind): string {
+  private jsonProviderSlotKey(kind: JsonCallbackKind): string {
     return `${this.libraryPath}:${kind}`;
   }
 }

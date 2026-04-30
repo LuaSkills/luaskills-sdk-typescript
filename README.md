@@ -6,7 +6,7 @@ Main LuaSkills repository: [LuaSkills/luaskills](https://github.com/LuaSkills/lu
 
 TypeScript / Node.js SDK for integrating the LuaSkills runtime through the public JSON FFI surface.
 
-The SDK wraps native library loading, JSON FFI buffers, engine lifecycle, formal skill roots, authority-aware management calls, skill config, provider callbacks, and runtime asset installation. Hosts should not need to hand-write low-level FFI buffers or JSON envelopes for normal integration.
+The SDK wraps native library loading, JSON FFI buffers, engine lifecycle, formal skill roots, authority-aware management calls, skill config, provider callbacks, host-tool callbacks, and runtime asset installation. Hosts should not need to hand-write low-level FFI buffers or JSON envelopes for normal integration.
 
 ## Installation
 
@@ -160,6 +160,7 @@ For source-tree examples, use npm scripts:
 ```powershell
 npm run example:basic
 npm run example:call
+npm run example:host-tool-callback
 npm run example:query
 npm run example:lifecycle
 npm run example:provider-callback
@@ -202,6 +203,38 @@ try {
 ```
 
 Callbacks must be registered before `engine_new`. Changing callbacks later does not retroactively affect already-created engines.
+
+## Host Tool Callback
+
+`vulcan.host.*` uses the fixed host-tool callback registered through `luaskills_ffi_set_host_tool_json_callback`. Register it before running skills that may call host-owned tools:
+
+```ts
+import { LuaSkillsJsonFfi, type HostToolJsonRequest } from "@luaskills/sdk";
+
+// Runtime root used by the host integration.
+// 宿主集成使用的运行时根目录。
+const runtimeRoot = "D:/runtime/luaskills";
+// Low-level FFI bridge that owns callback registration.
+// 持有 callback 注册的底层 FFI 桥。
+const ffi = new LuaSkillsJsonFfi({ runtimeRoot });
+
+// Handle list, has, and call actions from vulcan.host.*.
+// 处理来自 vulcan.host.* 的 list、has 和 call 动作。
+ffi.setHostToolJsonCallback((request: HostToolJsonRequest) => {
+  switch (request.action) {
+    case "list":
+      return [{ name: "model.embed", description: "embedding model bridge" }];
+    case "has":
+      return request.tool_name === "model.embed";
+    case "call":
+      return { ok: true, value: { request: request.args } };
+    default:
+      return { ok: false, error: { code: "unsupported_action", message: request.action } };
+  }
+});
+```
+
+The callback receives `{ action, tool_name, args }`. `list` should return host-visible tool metadata, `has` should return a boolean or an object with `exists` / `has` / `available`, and `call` should return one complete table-shaped result. Call `ffi.clearHostToolJsonCallback()` during shutdown. Streaming is intentionally outside this bridge.
 
 ## Authority And Management
 
@@ -318,6 +351,7 @@ The SDK covers the public JSON FFI surface:
 - call_skill / run_lua
 - skill_config list / get / set / delete
 - SQLite / LanceDB JSON provider callback register / clear
+- Host-tool JSON callback register / clear
 - disable / enable / install / update / uninstall
 - system_disable / system_enable / system_install / system_update / system_uninstall
 
