@@ -58,6 +58,8 @@ node .\examples\lifecycle.mjs
 node .\examples\provider-callback.mjs
 ```
 
+模型 callback 对接见主 [SDK README](../README_cn.md#模型-callback)。通用示例不直接调用真实模型 provider，因为模型凭证、provider 选择、预算与脱敏策略都归宿主管理。
+
 ## Fixture Skill
 
 夹具 skill 位于 `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`。它故意放在 USER 层，这样委托查询示例不需要 System 权限也能看到它。

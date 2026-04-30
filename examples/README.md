@@ -58,6 +58,8 @@ node .\examples\lifecycle.mjs
 node .\examples\provider-callback.mjs
 ```
 
+Model callback integration is documented in the main [SDK README](../README.md#model-callback). The generic examples do not call a real model provider because model credentials, provider choice, budgets, and redaction policy are host-owned.
+
 ## Fixture Skill
 
 The fixture skill is stored at `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`. It intentionally lives in USER so delegated-query examples can see it without System authority.

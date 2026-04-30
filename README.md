@@ -236,6 +236,75 @@ ffi.setHostToolJsonCallback((request: HostToolJsonRequest) => {
 
 The callback receives `{ action, tool_name, args }`. `list` should return host-visible tool metadata, `has` should return a boolean or an object with `exists` / `has` / `available`, and `call` should return one complete table-shaped result. Call `ffi.clearHostToolJsonCallback()` during shutdown. Streaming is intentionally outside this bridge.
 
+## Model Callback
+
+`vulcan.models.*` uses fixed model callbacks registered through `luaskills_ffi_set_model_embed_json_callback` and `luaskills_ffi_set_model_llm_json_callback`. Lua skills can only call `vulcan.models.embed(text)` and `vulcan.models.llm(system, user)`; provider selection, model names, keys, temperature, thinking, limits, and stream policy stay fully host-owned.
+
+Register model callbacks before creating or using an engine that may run model-aware skills. Keep the `LuaSkillsJsonFfi` instance alive for as long as the callback should stay registered, and clear callbacks during shutdown or test teardown.
+
+The SDK callback is the host boundary:
+
+- It receives a fixed request shape from LuaSkills.
+- It should call the host-selected provider using host-managed configuration.
+- It should return a bare success payload for successful provider calls.
+- It should return an error envelope for provider failures that need `provider_message`, `provider_code`, or `provider_status`.
+- It should not expose API keys, Authorization headers, signatures, or raw request headers in provider error fields.
+
+```ts
+import {
+  LuaSkillsJsonFfi,
+  type RuntimeModelEmbedRequest,
+  type RuntimeModelLlmRequest,
+} from "@luaskills/sdk";
+
+const runtimeRoot = "D:/runtime/luaskills";
+const ffi = new LuaSkillsJsonFfi({ runtimeRoot });
+
+ffi.setModelEmbedJsonCallback((request: RuntimeModelEmbedRequest) => {
+  return {
+    vector: [0.1, 0.2, 0.3],
+    dimensions: 3,
+    usage: { input_tokens: request.text.length },
+  };
+});
+
+ffi.setModelLlmJsonCallback((request: RuntimeModelLlmRequest) => {
+  if (request.user.includes("missing-model")) {
+    return {
+      ok: false,
+      error: {
+        code: "provider_error",
+        message: "model provider rejected the request",
+        provider_message: "raw provider message after host-side redaction",
+        provider_code: "model_not_found",
+        provider_status: 404,
+      },
+    };
+  }
+  return {
+    assistant: `handled ${request.system}: ${request.user}`,
+    usage: { input_tokens: 12, output_tokens: 8 },
+  };
+});
+```
+
+The callback request includes `{ text, caller }` for embeddings and `{ system, user, caller }` for LLM calls. Return bare success payloads, or `{ ok: false, error: { code, message, provider_message?, provider_code?, provider_status? } }` for provider failures. Call `ffi.clearModelEmbedJsonCallback()` and `ffi.clearModelLlmJsonCallback()` during shutdown.
+
+Minimal runtime check after registration:
+
+```ts
+const status = client.runLua("return vulcan.models.status()");
+const embedResult = client.runLua('return vulcan.models.embed("hello")');
+const llmResult = client.runLua('return vulcan.models.llm("system", "user")');
+```
+
+Common integration mistakes:
+
+- `model_unavailable`: the matching callback was not registered or was cleared before the skill call.
+- Missing provider details: return a structured error envelope instead of throwing provider errors from the callback.
+- Missing FFI symbol: install a LuaSkills runtime that exports `luaskills_ffi_set_model_embed_json_callback` and `luaskills_ffi_set_model_llm_json_callback`.
+- Empty `caller` fields: call through a loaded runtime skill or a runtime `runLua` context, not a detached provider unit test.
+
 ## Authority And Management
 
 Query APIs default to `Authority.DelegatedTool`, so ROOT skills are hidden from delegated tools:
@@ -352,6 +421,7 @@ The SDK covers the public JSON FFI surface:
 - skill_config list / get / set / delete
 - SQLite / LanceDB JSON provider callback register / clear
 - Host-tool JSON callback register / clear
+- Model embed / LLM JSON callback register / clear
 - disable / enable / install / update / uninstall
 - system_disable / system_enable / system_install / system_update / system_uninstall
 

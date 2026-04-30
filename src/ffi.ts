@@ -124,6 +124,266 @@ export type HostToolJsonRequest = {
 export type HostToolJsonCallback = JsonCallback<HostToolJsonRequest>;
 
 /**
+ * Standard model capability names exposed by vulcan.models.*.
+ * vulcan.models.* 暴露的标准模型能力名称。
+ */
+export type RuntimeModelCapability = "embed" | "llm";
+
+/**
+ * Caller context attached by LuaSkills to each model callback request.
+ * LuaSkills 附加到每个模型 callback 请求上的调用方上下文。
+ */
+export type RuntimeModelCaller = {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的前向兼容 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * Skill identifier that owns the active Lua entry.
+   * 拥有当前 Lua 入口的 skill 标识符。
+   */
+  skill_id?: string | null;
+  /**
+   * Local entry name declared by the owning skill.
+   * 所属 skill 声明的局部入口名称。
+   */
+  entry_name?: string | null;
+  /**
+   * Canonical runtime tool name currently executing.
+   * 当前正在执行的 canonical 运行时工具名称。
+   */
+  canonical_tool_name?: string | null;
+  /**
+   * Runtime root name that owns the current skill.
+   * 拥有当前 skill 的运行时根名称。
+   */
+  root_name?: string | null;
+  /**
+   * Host-visible absolute skill directory.
+   * 对宿主可见的绝对 skill 目录。
+   */
+  skill_dir?: string | null;
+  /**
+   * Host-provided client name from the current request context.
+   * 当前请求上下文中的宿主提供客户端名称。
+   */
+  client_name?: string | null;
+  /**
+   * Host-provided request identifier from the current request context.
+   * 当前请求上下文中的宿主提供请求标识符。
+   */
+  request_id?: string | null;
+};
+
+/**
+ * Optional token usage metadata returned by host-managed model providers.
+ * 宿主管理模型 provider 返回的可选 token 用量元数据。
+ */
+export type RuntimeModelUsage = {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的前向兼容 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * Optional input token count.
+   * 可选输入 token 数量。
+   */
+  input_tokens?: number | null;
+  /**
+   * Optional output token count.
+   * 可选输出 token 数量。
+   */
+  output_tokens?: number | null;
+};
+
+/**
+ * Embedding request delivered to the SDK callback.
+ * 传递给 SDK callback 的 embedding 请求。
+ */
+export type RuntimeModelEmbedRequest = {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的前向兼容 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * Single input text requested by Lua.
+   * Lua 请求的单条输入文本。
+   */
+  text: string;
+  /**
+   * Caller context captured from the active Lua runtime scope.
+   * 从当前 Lua 运行时作用域捕获的调用方上下文。
+   */
+  caller: RuntimeModelCaller;
+};
+
+/**
+ * Embedding response returned by the SDK callback.
+ * SDK callback 返回的 embedding 响应。
+ */
+export type RuntimeModelEmbedResponse = {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的前向兼容 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * Embedding vector returned by the host-managed model provider.
+   * 宿主管理模型 provider 返回的 embedding 向量。
+   */
+  vector: number[];
+  /**
+   * Number of vector dimensions reported by the host.
+   * 宿主报告的向量维度数量。
+   */
+  dimensions: number;
+  /**
+   * Optional token usage metadata reported by the host.
+   * 宿主报告的可选 token 用量元数据。
+   */
+  usage?: RuntimeModelUsage | null;
+};
+
+/**
+ * Non-streaming LLM request delivered to the SDK callback.
+ * 传递给 SDK callback 的非流式 LLM 请求。
+ */
+export type RuntimeModelLlmRequest = {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的前向兼容 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * System instruction text supplied by Lua.
+   * Lua 提供的 system 指令文本。
+   */
+  system: string;
+  /**
+   * User message text supplied by Lua.
+   * Lua 提供的 user 消息文本。
+   */
+  user: string;
+  /**
+   * Caller context captured from the active Lua runtime scope.
+   * 从当前 Lua 运行时作用域捕获的调用方上下文。
+   */
+  caller: RuntimeModelCaller;
+};
+
+/**
+ * Non-streaming LLM response returned by the SDK callback.
+ * SDK callback 返回的非流式 LLM 响应。
+ */
+export type RuntimeModelLlmResponse = {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的前向兼容 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * Assistant text returned by the host-managed model provider.
+   * 宿主管理模型 provider 返回的 assistant 文本。
+   */
+  assistant: string;
+  /**
+   * Optional token usage metadata reported by the host.
+   * 宿主报告的可选 token 用量元数据。
+   */
+  usage?: RuntimeModelUsage | null;
+};
+
+/**
+ * Stable model error codes accepted by the JSON callback bridge.
+ * JSON callback 桥接受的稳定模型错误码。
+ */
+export type RuntimeModelErrorCode =
+  | "model_unavailable"
+  | "invalid_argument"
+  | "provider_error"
+  | "timeout"
+  | "budget_exceeded"
+  | "internal_error";
+
+/**
+ * Structured model error returned by a model JSON callback.
+ * 模型 JSON callback 返回的结构化模型错误。
+ */
+export type RuntimeModelError = {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的前向兼容 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * Stable LuaSkills-level model error code.
+   * 稳定的 LuaSkills 级模型错误码。
+   */
+  code: RuntimeModelErrorCode;
+  /**
+   * Human-readable error summary.
+   * 人类可读的错误摘要。
+   */
+  message: string;
+  /**
+   * Optional raw provider error text after host-side redaction.
+   * 宿主侧脱敏后的可选 provider 原始错误文本。
+   */
+  provider_message?: string | null;
+  /**
+   * Optional raw provider error code.
+   * 可选 provider 原始错误码。
+   */
+  provider_code?: string | null;
+  /**
+   * Optional provider status such as an HTTP status code.
+   * 可选 provider 状态，例如 HTTP 状态码。
+   */
+  provider_status?: number | null;
+};
+
+/**
+ * Error envelope returned by a model JSON callback.
+ * 模型 JSON callback 返回的错误包络。
+ */
+export type RuntimeModelErrorEnvelope = {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的前向兼容 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * Always false for callback error envelopes.
+   * callback 错误包络中固定为 false。
+   */
+  ok: false;
+  /**
+   * Structured model error payload.
+   * 结构化模型错误载荷。
+   */
+  error: RuntimeModelError;
+};
+
+/**
+ * Host-side model embedding JSON callback implemented by SDK callers.
+ * 由 SDK 调用方实现的宿主侧模型 embedding JSON callback。
+ */
+export type ModelEmbedJsonCallback = (
+  request: RuntimeModelEmbedRequest,
+) => RuntimeModelEmbedResponse | RuntimeModelErrorEnvelope;
+
+/**
+ * Host-side model LLM JSON callback implemented by SDK callers.
+ * 由 SDK 调用方实现的宿主侧模型 LLM JSON callback。
+ */
+export type ModelLlmJsonCallback = (
+  request: RuntimeModelLlmRequest,
+) => RuntimeModelLlmResponse | RuntimeModelErrorEnvelope;
+
+/**
  * Function shape used by luaskills_ffi_buffer_clone.
  * luaskills_ffi_buffer_clone 使用的函数形状。
  */
@@ -148,7 +408,7 @@ type JsonProviderSetterFunction = (
  * Native JSON callback slot names managed by this bridge.
  * 当前桥接管理的原生 JSON callback 槽位名称。
  */
-type JsonCallbackKind = "sqlite" | "lancedb" | "host-tool";
+type JsonCallbackKind = "sqlite" | "lancedb" | "host-tool" | "model-embed" | "model-llm";
 
 /**
  * Module-level JSON callback slot state matching native process-wide slots.
@@ -361,6 +621,30 @@ export class LuaSkillsJsonFfi {
   }
 
   /**
+   * Register or clear the model embedding JSON callback.
+   * 注册或清理模型 embedding JSON callback。
+   */
+  setModelEmbedJsonCallback(callback: ModelEmbedJsonCallback | null): void {
+    this.setJsonProviderCallback(
+      "model-embed",
+      "luaskills_ffi_set_model_embed_json_callback",
+      callback,
+    );
+  }
+
+  /**
+   * Register or clear the model LLM JSON callback.
+   * 注册或清理模型 LLM JSON callback。
+   */
+  setModelLlmJsonCallback(callback: ModelLlmJsonCallback | null): void {
+    this.setJsonProviderCallback(
+      "model-llm",
+      "luaskills_ffi_set_model_llm_json_callback",
+      callback,
+    );
+  }
+
+  /**
    * Clear the SQLite JSON provider callback slot.
    * 清理 SQLite JSON provider callback 槽位。
    */
@@ -382,6 +666,22 @@ export class LuaSkillsJsonFfi {
    */
   clearHostToolJsonCallback(): void {
     this.setHostToolJsonCallback(null);
+  }
+
+  /**
+   * Clear the model embedding JSON callback slot.
+   * 清理模型 embedding JSON callback 槽位。
+   */
+  clearModelEmbedJsonCallback(): void {
+    this.setModelEmbedJsonCallback(null);
+  }
+
+  /**
+   * Clear the model LLM JSON callback slot.
+   * 清理模型 LLM JSON callback 槽位。
+   */
+  clearModelLlmJsonCallback(): void {
+    this.setModelLlmJsonCallback(null);
   }
 
   /**
