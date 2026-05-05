@@ -15,6 +15,12 @@ import type { LuaRuntimeHostOptions } from "./types.js";
 export const DEFAULT_LUASKILLS_VERSION = "v0.3.0";
 
 /**
+ * Default luaskills-packages release tag used by SDK runtime installation.
+ * SDK 运行时安装使用的默认 luaskills-packages 发布标签。
+ */
+export const DEFAULT_LUASKILLS_PACKAGES_VERSION = "v0.1.5";
+
+/**
  * Default vldb-controller release tag used by SDK runtime installation.
  * SDK 运行时安装使用的默认 vldb-controller 发布标签。
  */
@@ -228,8 +234,8 @@ export interface RuntimeInstallOptions {
    */
   luaskillsVersion?: string;
   /**
-   * Lua runtime release tag.
-   * Lua runtime 发布标签。
+   * Runtime packages release tag published by luaskills-packages.
+   * luaskills-packages 发布的 runtime packages 标签。
    */
   luaRuntimeVersion?: string;
   /**
@@ -263,8 +269,8 @@ export interface RuntimeInstallOptions {
    */
   luaskillsRepo?: string;
   /**
-   * GitHub repository that publishes Lua runtime assets.
-   * 发布 Lua runtime 资产的 GitHub 仓库。
+   * GitHub repository that publishes runtime packages assets.
+   * 发布 runtime packages 资产的 GitHub 仓库。
    */
   luaRuntimeRepo?: string;
   /**
@@ -497,8 +503,16 @@ function linuxTarget(archPrefix: "x86_64" | "aarch64", platformKey: string): Run
 function buildRuntimeAssetDescriptors(options: RuntimeInstallOptions & { database: RuntimeDatabasePreset; runtimeRoot: string }, platform: RuntimePlatformTarget): RuntimeAssetDescriptor[] {
   const assets: RuntimeAssetDescriptor[] = [];
   if (options.includeLuaRuntime ?? true) {
-    const assetName = `lua-runtime-${platform.platform_key}.tar.gz`;
-    assets.push(releaseAsset("lua_runtime", options.luaRuntimeRepo ?? options.luaskillsRepo ?? "LuaSkills/luaskills", options.luaRuntimeVersion ?? options.luaskillsVersion ?? DEFAULT_LUASKILLS_VERSION, assetName, "resources/lua-runtime-manifest.json"));
+    const assetName = `lua-runtime-packages-${platform.platform_key}.tar.gz`;
+    assets.push(
+      releaseAsset(
+        "lua_runtime",
+        options.luaRuntimeRepo ?? "LuaSkills/luaskills-packages",
+        options.luaRuntimeVersion ?? DEFAULT_LUASKILLS_PACKAGES_VERSION,
+        assetName,
+        "resources/lua-runtime-manifest.json",
+      ),
+    );
   }
   if (options.includeLuaSkillsFfi ?? true) {
     const assetName = `luaskills-ffi-sdk-${platform.platform_key}.tar.gz`;
@@ -958,7 +972,7 @@ async function installLuaRuntime(runtimeRoot: string, extractDirectory: string, 
   await copyDirectoryIfPresent(join(extractDirectory, "lua_packages"), resolve(runtimeRoot, "lua_packages"));
   await copyDirectoryIfPresent(join(extractDirectory, "libs"), resolve(runtimeRoot, "libs"));
   await copyDirectoryIfPresent(join(extractDirectory, "resources"), resolve(runtimeRoot, "resources"));
-  await copyDirectoryIfPresent(join(extractDirectory, "licenses"), resolve(runtimeRoot, "licenses", "lua-runtime"));
+  await copyDirectoryIfPresent(join(extractDirectory, "licenses"), resolve(runtimeRoot, "licenses"));
   const markerPath = resolve(runtimeRoot, "resources", "lua-runtime-manifest.json");
   if (!existsSync(markerPath)) {
     throw new Error(`Lua runtime manifest was not found after installing ${asset.asset_name}`);

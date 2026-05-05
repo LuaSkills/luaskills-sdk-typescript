@@ -40,7 +40,7 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 
 默认 LuaSkills 资产：
 
-- `lua-runtime-{platform}.tar.gz`：默认安装；提供 `lua_packages`、运行时 `libs`、`resources` 与运行时授权材料。
+- `LuaSkills/luaskills-packages` 发布的 `lua-runtime-packages-{platform}.tar.gz`：默认安装；提供 `lua_packages`、packages 侧运行时 `libs`、`resources` 与第三方运行时授权材料。
 - `luaskills-ffi-sdk-{platform}.tar.gz`：默认安装；提供公共 FFI 动态库、头文件与 FFI 授权材料。
 - `lua-deps-{platform}.tar.gz`：SDK 不默认安装；它是 CI、源码构建或高级原生模块重建使用的构建期依赖包。
 
@@ -409,7 +409,7 @@ npx @luaskills/sdk version --runtime-root D:\runtime\luaskills
 
 ### 运行时缺少 Lua 模块
 
-如果 skill 运行时出现 Lua 模块加载错误，请确认运行 `install-runtime` 时没有使用 `--skip-lua-runtime`，并且 `runtimeRoot/lua_packages` 存在。SDK 默认安装 `lua-runtime-{platform}.tar.gz` 正是为了解决这个运行期依赖问题。
+如果 skill 运行时出现 Lua 模块加载错误，请确认运行 `install-runtime` 时没有使用 `--skip-lua-runtime`，并且 `runtimeRoot/lua_packages` 存在。SDK 默认安装 `LuaSkills/luaskills-packages` 的 `lua-runtime-packages-{platform}.tar.gz`，正是为了解决这个运行期依赖问题。
 
 ```powershell
 npx @luaskills/sdk install-runtime --database none --runtime-root D:\runtime\luaskills
@@ -457,7 +457,7 @@ SDK 覆盖公共 JSON FFI 主要入口：
 
 发布版本记录在 `VERSION`。发布前请保持 `VERSION`、`package.json` 与 `package-lock.json` 一致。
 
-如果要做生态统一发布，必须先发布同版本的 `LuaSkills/luaskills` GitHub release，确保本 SDK 默认安装器引用的 runtime 资产已经存在。
+如果要做生态统一发布，必须先发布同版本的 `LuaSkills/luaskills` 与匹配的 `LuaSkills/luaskills-packages` GitHub release，确保本 SDK 默认安装器引用的 runtime 资产已经存在。
 
 发布前执行：
 

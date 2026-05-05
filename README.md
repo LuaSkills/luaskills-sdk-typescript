@@ -40,7 +40,7 @@ Supported database modes:
 
 Default LuaSkills assets:
 
-- `lua-runtime-{platform}.tar.gz`: installed by default; provides `lua_packages`, runtime `libs`, `resources`, and runtime licenses.
+- `lua-runtime-packages-{platform}.tar.gz` from `LuaSkills/luaskills-packages`: installed by default; provides `lua_packages`, package-side runtime `libs`, `resources`, and third-party runtime licenses.
 - `luaskills-ffi-sdk-{platform}.tar.gz`: installed by default; provides the public FFI dynamic library, headers, and FFI licenses.
 - `lua-deps-{platform}.tar.gz`: not installed by the SDK; it is a build-time bundle for CI, source builds, or advanced native module rebuilds.
 
@@ -409,7 +409,7 @@ npx @luaskills/sdk version --runtime-root D:\runtime\luaskills
 
 ### Lua modules are missing at runtime
 
-If a skill fails with Lua module loading errors, make sure `install-runtime` was run without `--skip-lua-runtime` and that `runtimeRoot/lua_packages` exists. The SDK installs `lua-runtime-{platform}.tar.gz` by default for this reason.
+If a skill fails with Lua module loading errors, make sure `install-runtime` was run without `--skip-lua-runtime` and that `runtimeRoot/lua_packages` exists. The SDK installs `lua-runtime-packages-{platform}.tar.gz` from `LuaSkills/luaskills-packages` by default for this reason.
 
 ```powershell
 npx @luaskills/sdk install-runtime --database none --runtime-root D:\runtime\luaskills
@@ -457,7 +457,7 @@ The SDK covers the public JSON FFI surface:
 
 The release version is stored in `VERSION`. Keep `VERSION`, `package.json`, and `package-lock.json` aligned before publishing.
 
-For one unified ecosystem release, publish the core repository `LuaSkills/luaskills` first so the default runtime installer assets for this SDK already exist before npm goes live.
+For one unified ecosystem release, publish `LuaSkills/luaskills` and the matching `LuaSkills/luaskills-packages` release first so the default runtime installer assets for this SDK already exist before npm goes live.
 
 Before publishing:
 
