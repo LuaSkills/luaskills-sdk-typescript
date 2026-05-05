@@ -1,6 +1,6 @@
 {
   "name": "@luaskills/sdk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "TypeScript and Node.js SDK for integrating the LuaSkills runtime through the JSON FFI surface.",
   "type": "module",
   "main": "./dist/index.js",
