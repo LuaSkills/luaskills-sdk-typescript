@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { chmod, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, posix as posixPath, relative, resolve } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createGunzip } from "node:zlib";
 import type { LuaRuntimeHostOptions } from "./types.js";
 
@@ -15,10 +15,10 @@ import type { LuaRuntimeHostOptions } from "./types.js";
 export const DEFAULT_LUASKILLS_VERSION = "v0.3.1";
 
 /**
- * Default luaskills-packages release tag used by SDK runtime installation.
- * SDK 运行时安装使用的默认 luaskills-packages 发布标签。
+ * Default luaskills-packages release series used by SDK runtime installation.
+ * SDK 运行时安装使用的默认 luaskills-packages 发布协议线。
  */
-export const DEFAULT_LUASKILLS_PACKAGES_VERSION = "v0.1.6";
+export const DEFAULT_LUASKILLS_PACKAGES_SERIES = "0.1";
 
 /**
  * Default vldb-controller release tag used by SDK runtime installation.
@@ -239,6 +239,11 @@ export interface RuntimeInstallOptions {
    */
   luaRuntimeVersion?: string;
   /**
+   * Runtime packages release series published by luaskills-packages.
+   * luaskills-packages 发布的 runtime packages 协议线。
+   */
+  luaRuntimeSeries?: string;
+  /**
    * vldb-controller release tag.
    * vldb-controller 发布标签。
    */
@@ -333,7 +338,12 @@ export function buildRuntimeInstallManifest(options: RuntimeInstallOptions): Run
   const runtimeRoot = resolve(options.runtimeRoot);
   const database = normalizeDatabasePreset(options.database ?? RuntimeDatabasePreset.None);
   const platform = resolveRuntimePlatformTarget();
-  const assets = buildRuntimeAssetDescriptors({ ...options, database, runtimeRoot }, platform);
+  const resolvedLuaRuntimeVersion = options.luaRuntimeVersion
+    ?? resolveLatestReleaseTagForSeriesSync(
+      options.luaRuntimeRepo ?? "LuaSkills/luaskills-packages",
+      options.luaRuntimeSeries ?? DEFAULT_LUASKILLS_PACKAGES_SERIES,
+    );
+  const assets = buildRuntimeAssetDescriptors({ ...options, database, runtimeRoot, luaRuntimeVersion: resolvedLuaRuntimeVersion }, platform);
   return {
     schema_version: 1,
     generated_at: new Date().toISOString(),
@@ -508,7 +518,7 @@ function buildRuntimeAssetDescriptors(options: RuntimeInstallOptions & { databas
       releaseAsset(
         "lua_runtime",
         options.luaRuntimeRepo ?? "LuaSkills/luaskills-packages",
-        options.luaRuntimeVersion ?? DEFAULT_LUASKILLS_PACKAGES_VERSION,
+        options.luaRuntimeVersion!,
         assetName,
         "resources/lua-runtime-manifest.json",
       ),
@@ -548,6 +558,86 @@ function releaseAsset(role: RuntimeAssetRole, repository: string, version: strin
     sha256_url: `${baseUrl}.sha256`,
     installed_path: installedPath,
   };
+}
+
+/**
+ * Resolve the newest published release tag inside one semantic-version series.
+ * 解析单个语义化版本协议线中的最新已发布标签。
+ */
+function resolveLatestReleaseTagForSeriesSync(repository: string, series: string): string {
+  const apiScript = `
+const https = require("node:https");
+const repository = process.argv[1];
+const series = process.argv[2];
+const [majorText, minorText] = series.split(".");
+const major = Number.parseInt(majorText, 10);
+const minor = Number.parseInt(minorText, 10);
+if (!Number.isFinite(major) || !Number.isFinite(minor)) {
+  console.error("Invalid release series: " + series);
+  process.exit(2);
+}
+const request = https.get(
+  "https://api.github.com/repos/" + repository + "/releases?per_page=100",
+  {
+    headers: {
+      "Accept": "application/vnd.github+json",
+      "User-Agent": "luaskills-sdk-typescript",
+    },
+  },
+  (response) => {
+    let body = "";
+    response.setEncoding("utf8");
+    response.on("data", (chunk) => { body += chunk; });
+    response.on("end", () => {
+      if (response.statusCode !== 200) {
+        console.error("GitHub releases API returned " + response.statusCode + " for " + repository);
+        process.exit(3);
+      }
+      const releases = JSON.parse(body);
+      const candidates = releases
+        .filter((release) => !release.draft && !release.prerelease)
+        .map((release) => {
+          const tag = String(release.tag_name || "");
+          const match = /^v?(\\d+)\\.(\\d+)\\.(\\d+)$/.exec(tag);
+          if (!match) {
+            return null;
+          }
+          const parsedMajor = Number.parseInt(match[1], 10);
+          const parsedMinor = Number.parseInt(match[2], 10);
+          const parsedPatch = Number.parseInt(match[3], 10);
+          if (parsedMajor !== major || parsedMinor !== minor || !Number.isFinite(parsedPatch)) {
+            return null;
+          }
+          return { tag, patch: parsedPatch };
+        })
+        .filter(Boolean)
+        .sort((left, right) => right.patch - left.patch);
+      if (!candidates.length) {
+        console.error("No published release found in series " + series + " for " + repository);
+        process.exit(4);
+      }
+      process.stdout.write(candidates[0].tag);
+    });
+  },
+);
+request.on("error", (error) => {
+  console.error(String(error));
+  process.exit(5);
+});
+`;
+  const result = spawnSync(process.execPath, ["-e", apiScript, repository, series], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    const message = result.stderr.trim() || result.stdout.trim() || `Unable to resolve latest release for ${repository} series ${series}`;
+    throw new Error(message);
+  }
+  const resolvedTag = result.stdout.trim();
+  if (!resolvedTag) {
+    throw new Error(`Unable to resolve latest release for ${repository} series ${series}`);
+  }
+  return resolvedTag;
 }
 
 /**
