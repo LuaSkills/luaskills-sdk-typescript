@@ -18,7 +18,7 @@ export const DEFAULT_LUASKILLS_VERSION = "v0.3.0";
  * Default luaskills-packages release tag used by SDK runtime installation.
  * SDK 运行时安装使用的默认 luaskills-packages 发布标签。
  */
-export const DEFAULT_LUASKILLS_PACKAGES_VERSION = "v0.1.5";
+export const DEFAULT_LUASKILLS_PACKAGES_VERSION = "v0.1.6";
 
 /**
  * Default vldb-controller release tag used by SDK runtime installation.
