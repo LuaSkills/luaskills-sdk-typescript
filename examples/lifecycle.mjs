@@ -1,6 +1,8 @@
-import { Authority, LuaSkillsClient, RuntimeRoots } from "@luaskills/sdk";
+import { sdk } from "./load-sdk.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const { Authority, LuaSkillsClient, RuntimeRoots } = sdk;
 
 // Absolute path for this example file.
 // 当前示例文件的绝对路径。

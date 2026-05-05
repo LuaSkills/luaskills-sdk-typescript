@@ -163,16 +163,45 @@ npm run example:call
 npm run example:host-tool-callback
 npm run example:query
 npm run example:lifecycle
+npm run example:runtime-session
 npm run example:provider-callback
 ```
 
-The query and lifecycle examples use the bundled fixture skill at `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`. Install runtime assets into that root first:
+The query, lifecycle, and runtime-session examples use the bundled fixture skill at `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`. Install runtime assets into that root first:
 
 ```powershell
 npx @luaskills/sdk install-runtime --database none --runtime-root .\examples\fixture-runtime
 ```
 
 See [examples/README.md](examples/README.md) for the full example index and runtime notes. The Chinese example guide is [examples/README_cn.md](examples/README_cn.md).
+
+## Persistent Runtime Sessions
+
+Use `client.runtimeSessions()` for the public lease endpoints, or `client.system(authority).runtimeSessions()` when the host wants fixed authority injection through the dedicated system runtime-session exports provided by the latest native library.
+
+```ts
+import { Authority, LuaSkillsClient } from "@luaskills/sdk";
+
+const client = LuaSkillsClient.create({ runtimeRoot: "D:/runtime/luaskills" });
+
+try {
+  const sessions = client.system(Authority.System).runtimeSessions();
+  const session = sessions.createHandle("demo-session", 600, true);
+  const result = session.eval("counter = (counter or 0) + 1; return { counter = counter }");
+  console.log(result.result);
+  console.log(session.status());
+  console.log(session.close());
+} finally {
+  client.close();
+}
+```
+
+## Migration Notes
+
+- Existing `client.system(authority)` lifecycle calls keep working; the returned wrapper now also exposes query helpers and `runtimeSessions()`.
+- `RuntimeSessionHandle` persists `lease_id + sid + generation` and automatically reattaches identity guards on `eval`, `status`, and `close`.
+- `client.system(authority).runtimeSessions()` requires the dedicated `luaskills_ffi_system_runtime_session_*` exports from the latest native library and fails fast when they are missing.
+- Source-tree examples now load the published package when available and otherwise fall back to the local `dist` build, so the repository smoke path and standalone examples package use the same scripts.
 
 ## JSON Provider Callback
 
@@ -413,8 +442,7 @@ The SDK covers the public JSON FFI surface:
 
 - version / describe
 - engine_new / engine_free
-- load_from_dirs / load_from_roots
-- reload_from_dirs / reload_from_roots
+- load_from_roots / reload_from_roots
 - list_entries / list_skill_help / render_skill_help_detail
 - prompt_argument_completions / is_skill / skill_name_for_tool
 - call_skill / run_lua
@@ -428,6 +456,8 @@ The SDK covers the public JSON FFI surface:
 ## Publishing
 
 The release version is stored in `VERSION`. Keep `VERSION`, `package.json`, and `package-lock.json` aligned before publishing.
+
+For one unified ecosystem release, publish the core repository `LuaSkills/luaskills` first so the default runtime installer assets for this SDK already exist before npm goes live.
 
 Before publishing:
 
@@ -445,6 +475,8 @@ The package exposes:
 - `bin`: `dist/cli.js`
 
 Use a new patch version for every npm publish. Published versions cannot be overwritten.
+
+Recommended unified publish order: `luaskills` core release -> TypeScript SDK -> Python SDK -> Go SDK -> SDK examples releases.
 
 After npm publishes successfully, run the GitHub Actions workflow **Examples Release** manually. It reads `VERSION`, installs `@luaskills/sdk@{VERSION}` from npm, installs LuaSkills runtime assets, runs the examples, then creates or updates the `examples-v{VERSION}` GitHub Release with:
 

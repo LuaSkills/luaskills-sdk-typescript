@@ -52,6 +52,12 @@ type HostOptionsOverride = Partial<Omit<LuaRuntimeHostOptions, "space_controller
 };
 
 /**
+ * Generic JSON object payload used by runtime-session and system helpers.
+ * 运行时会话与 system 辅助器使用的通用 JSON 对象载荷。
+ */
+export type JsonMap = Record<string, JsonValue | undefined>;
+
+/**
  * Options accepted by runtime help rendering.
  * 运行时帮助渲染接受的选项。
  */
@@ -156,6 +162,14 @@ export class LuaSkillsClient {
   }
 
   /**
+   * Return one runtime-session namespace over the public JSON FFI surface.
+   * 返回一个基于公共 JSON FFI 接口的运行时会话命名空间。
+   */
+  runtimeSessions(): RuntimeSessionClient {
+    return new RuntimeSessionClient(this);
+  }
+
+  /**
    * Query the JSON FFI version through the current low-level bridge.
    * 通过当前底层桥查询 JSON FFI 版本。
    */
@@ -172,19 +186,6 @@ export class LuaSkillsClient {
   }
 
   /**
-   * Load skills from legacy directory-style root options.
-   * 从旧目录风格 root 选项加载 skills。
-   */
-  loadFromDirs(baseDir: string, overrideDir?: string | null): RuntimeAckResult {
-    this.assertOpen();
-    return this.ffi.callJson<RuntimeAckResult>("luaskills_ffi_load_from_dirs_json", {
-      engine_id: this.engineId,
-      base_dir: baseDir,
-      override_dir: overrideDir ?? null,
-    });
-  }
-
-  /**
    * Load skills from the formal ordered root chain.
    * 从正式有序 root 链加载 skills。
    */
@@ -193,19 +194,6 @@ export class LuaSkillsClient {
     return this.ffi.callJson<RuntimeAckResult>("luaskills_ffi_load_from_roots_json", {
       engine_id: this.engineId,
       skill_roots: skillRoots,
-    });
-  }
-
-  /**
-   * Reload skills from legacy directory-style root options.
-   * 从旧目录风格 root 选项重载 skills。
-   */
-  reloadFromDirs(baseDir: string, overrideDir?: string | null): RuntimeAckResult {
-    this.assertOpen();
-    return this.ffi.callJson<RuntimeAckResult>("luaskills_ffi_reload_from_dirs_json", {
-      engine_id: this.engineId,
-      base_dir: baseDir,
-      override_dir: overrideDir ?? null,
     });
   }
 
@@ -442,8 +430,8 @@ export class SkillManagementClient {
    */
   constructor(
     protected readonly client: LuaSkillsClient,
-    private readonly systemPlane: boolean,
-    private readonly authority: Authority | `${Authority}` = Authority.System,
+    protected readonly systemPlane: boolean,
+    protected readonly authority: Authority | `${Authority}` = Authority.System,
   ) {}
 
   /**
@@ -454,21 +442,6 @@ export class SkillManagementClient {
     return this.client.ffi.callJson<RuntimeAckResult>(this.functionName("disable_skill"), {
       engine_id: this.client.engineId,
       skill_roots: skillRoots,
-      skill_id: skillId,
-      reason: reason ?? null,
-      ...this.authorityPayload(),
-    });
-  }
-
-  /**
-   * Disable one skill through legacy directory-style roots.
-   * 通过旧目录风格 roots 停用单个 skill。
-   */
-  disableInDirs(baseDir: string, skillId: string, overrideDir?: string | null, reason?: string | null): RuntimeAckResult {
-    return this.client.ffi.callJson<RuntimeAckResult>(this.functionName("disable_skill_in_dirs"), {
-      engine_id: this.client.engineId,
-      base_dir: baseDir,
-      override_dir: overrideDir ?? null,
       skill_id: skillId,
       reason: reason ?? null,
       ...this.authorityPayload(),
@@ -548,7 +521,7 @@ export class SkillManagementClient {
    * Build the concrete JSON FFI function name for the current namespace.
    * 为当前命名空间构造具体 JSON FFI 函数名称。
    */
-  private functionName(baseName: string): string {
+  protected functionName(baseName: string): string {
     return `luaskills_ffi_${this.systemPlane ? "system_" : ""}${baseName}_json`;
   }
 
@@ -556,7 +529,7 @@ export class SkillManagementClient {
    * Build the authority payload required by system JSON FFI entrypoints.
    * 构造 system JSON FFI 入口要求的权限载荷。
    */
-  private authorityPayload(overrideAuthority?: Authority | `${Authority}`): { authority?: Authority | `${Authority}` } {
+  protected authorityPayload(overrideAuthority?: Authority | `${Authority}`): { authority?: Authority | `${Authority}` } {
     return this.systemPlane ? { authority: overrideAuthority ?? this.authority } : {};
   }
 }
@@ -573,6 +546,456 @@ export class SystemSkillManagementClient extends SkillManagementClient {
   constructor(client: LuaSkillsClient, authority: Authority | `${Authority}`) {
     super(client, true, authority);
   }
+
+  /**
+   * Call one authority-bound JSON FFI function and require an object-shaped result payload.
+   * 调用一个绑定 authority 的 JSON FFI 函数并要求返回对象形状结果载荷。
+   */
+  call(functionName: string, payload: JsonMap = {}): JsonMap {
+    return requireJsonMap(
+      this.client.ffi.callJson<JsonValue>(functionName, this.withEngineAuthority(payload)),
+      `${functionName} object result`,
+    );
+  }
+
+  /**
+   * Call one authority-bound JSON FFI function and return any decoded JSON result shape.
+   * 调用一个绑定 authority 的 JSON FFI 函数并返回任意已解码 JSON 结果形状。
+   */
+  callValue<T = JsonValue>(functionName: string, payload: JsonMap = {}): T {
+    return this.client.ffi.callJson<T>(functionName, this.withEngineAuthority(payload));
+  }
+
+  /**
+   * Return one authority-bound runtime-session namespace.
+   * 返回一个绑定 authority 的运行时会话命名空间。
+   */
+  runtimeSessions(): RuntimeSessionClient {
+    return new RuntimeSessionClient(this.client, this.authority);
+  }
+
+  /**
+   * List runtime entries visible to the bound authority.
+   * 列出当前绑定 authority 可见的运行时入口。
+   */
+  listEntries(): RuntimeEntryDescriptor[] {
+    const result = this.callValue<RuntimeEntryDescriptor[]>("luaskills_ffi_list_entries_json");
+    if (!Array.isArray(result)) {
+      throw new Error("luaskills_ffi_list_entries_json did not return one array result");
+    }
+    return result;
+  }
+
+  /**
+   * List skill help trees visible to the bound authority.
+   * 列出当前绑定 authority 可见的技能帮助树。
+   */
+  listSkillHelp(): RuntimeSkillHelpDescriptor[] {
+    const result = this.callValue<RuntimeSkillHelpDescriptor[]>("luaskills_ffi_list_skill_help_json");
+    if (!Array.isArray(result)) {
+      throw new Error("luaskills_ffi_list_skill_help_json did not return one array result");
+    }
+    return result;
+  }
+
+  /**
+   * Render one help flow detail visible to the bound authority.
+   * 渲染当前绑定 authority 可见的单个帮助流程详情。
+   */
+  renderSkillHelpDetail(
+    skillId: string,
+    flowName = "main",
+    requestContext?: JsonValue,
+  ): RuntimeHelpDetail | null {
+    const payload: JsonMap = {
+      skill_id: skillId,
+      flow_name: flowName,
+    };
+    if (requestContext !== undefined) {
+      payload.request_context = requestContext;
+    }
+    const result = this.callValue<RuntimeHelpDetail | null>("luaskills_ffi_render_skill_help_detail_json", payload);
+    if (result === null) {
+      return null;
+    }
+    return result;
+  }
+
+  /**
+   * Query prompt argument completions visible to the bound authority.
+   * 查询当前绑定 authority 可见的 prompt 参数补全项。
+   */
+  promptArgumentCompletions(promptName: string, argumentName: string): string[] | null {
+    const result = this.callValue<string[] | null>("luaskills_ffi_prompt_argument_completions_json", {
+      prompt_name: promptName,
+      argument_name: argumentName,
+    });
+    if (result === null) {
+      return null;
+    }
+    if (!Array.isArray(result)) {
+      throw new Error("luaskills_ffi_prompt_argument_completions_json did not return one array result");
+    }
+    return result.filter((value): value is string => typeof value === "string");
+  }
+
+  /**
+   * Return whether one canonical tool name resolves to one visible skill entry.
+   * 返回某个 canonical 工具名是否解析为一个可见技能入口。
+   */
+  isSkill(toolName: string): boolean {
+    const result = this.call("luaskills_ffi_is_skill_json", {
+      tool_name: toolName,
+    });
+    if (typeof result.value !== "boolean") {
+      throw new Error("luaskills_ffi_is_skill_json did not return one boolean value field");
+    }
+    return result.value;
+  }
+
+  /**
+   * Resolve the visible owning skill id for one canonical tool name when available.
+   * 在可见时解析某个 canonical 工具名所属的技能标识。
+   */
+  skillNameForTool(toolName: string): string | null {
+    const result = this.call("luaskills_ffi_skill_name_for_tool_json", {
+      tool_name: toolName,
+    });
+    if (result.skill_id === null || result.skill_id === undefined) {
+      return null;
+    }
+    if (typeof result.skill_id !== "string") {
+      throw new Error("luaskills_ffi_skill_name_for_tool_json did not return a nullable string field");
+    }
+    return result.skill_id;
+  }
+
+  /**
+   * Attach the bound engine id and authority to one outgoing payload.
+   * 为单个发出的载荷附加已绑定的引擎标识与 authority。
+   */
+  private withEngineAuthority(payload: JsonMap): JsonMap {
+    return {
+      ...payload,
+      engine_id: this.client.engineId,
+      authority: this.authority,
+    };
+  }
+}
+
+/**
+ * Stable runtime-session identity payload persisted by SDK hosts.
+ * 由 SDK 宿主持久化的稳定运行时会话身份载荷。
+ */
+export interface RuntimeSessionIdentity {
+  /**
+   * Stable runtime lease id returned by the native engine.
+   * 原生引擎返回的稳定运行时租约标识。
+   */
+  lease_id: string;
+  /**
+   * Stable session id chosen by the host.
+   * 由宿主选择的稳定会话标识。
+   */
+  sid: string;
+  /**
+   * Monotonic generation number for one SID lineage.
+   * 单个 SID 谱系对应的单调递增代际编号。
+   */
+  generation: number;
+}
+
+/**
+ * Stateful runtime-session namespace over the JSON FFI runtime-session entrypoints.
+ * 覆盖 JSON FFI 运行时会话入口的有状态运行时会话命名空间。
+ */
+export class RuntimeSessionClient {
+  /**
+   * Create one runtime-session namespace for a parent SDK client.
+   * 为父级 SDK 客户端创建一个运行时会话命名空间。
+   */
+  constructor(
+    private readonly client: LuaSkillsClient,
+    private readonly authority?: Authority | `${Authority}`,
+  ) {}
+
+  /**
+   * Dispatch one raw runtime-session JSON request without applying success checks.
+   * 分发单个原始运行时会话 JSON 请求而不附加成功校验。
+   */
+  callRaw(action: string, payload: JsonMap): JsonMap {
+    const requestPayload: JsonMap = {
+      ...payload,
+      engine_id: this.client.engineId,
+    };
+    if (this.authority !== undefined) {
+      requestPayload.authority = this.authority;
+    }
+    return requireJsonMap(
+      this.client.ffi.callJson<JsonValue>(this.runtimeSessionFunctionName(action), requestPayload),
+      `runtime session ${action} result`,
+    );
+  }
+
+  /**
+   * Create or replace one persistent runtime lease.
+   * 创建或替换一个持久运行时租约。
+   */
+  create(sid: string, ttlSec = 600, replace = false): JsonMap {
+    return requireRuntimeSessionOK(
+      this.callRaw("create", {
+        sid,
+        ttl_sec: ttlSec,
+        replace,
+      }),
+      "runtime session create",
+    );
+  }
+
+  /**
+   * Create one runtime-session handle object from one fresh create response.
+   * 基于一份新的 create 响应创建一个运行时会话句柄对象。
+   */
+  createHandle(sid: string, ttlSec = 600, replace = false): RuntimeSessionHandle {
+    return RuntimeSessionHandle.fromPayload(this, this.create(sid, ttlSec, replace));
+  }
+
+  /**
+   * Rebuild one runtime-session handle object from one persisted payload.
+   * 基于一份已持久化载荷重建一个运行时会话句柄对象。
+   */
+  bindHandle(payload: JsonMap): RuntimeSessionHandle {
+    return RuntimeSessionHandle.fromPayload(this, payload);
+  }
+
+  /**
+   * Evaluate one Lua chunk inside one persistent runtime lease.
+   * 在一个持久运行时租约中执行单个 Lua 代码块。
+   */
+  eval(
+    leaseId: string,
+    code: string,
+    args: JsonMap = {},
+    timeoutMs = 60_000,
+    sid?: string,
+    generation?: number,
+  ): JsonMap {
+    const payload: JsonMap = {
+      lease_id: leaseId,
+      code,
+      args,
+      timeout_ms: timeoutMs,
+    };
+    if (sid !== undefined) {
+      payload.sid = sid;
+    }
+    if (generation !== undefined) {
+      payload.generation = generation;
+    }
+    return requireRuntimeSessionOK(this.callRaw("eval", payload), "runtime session eval");
+  }
+
+  /**
+   * Read one runtime lease status payload with optional identity guards.
+   * 读取单个运行时租约状态载荷，并可附带可选身份护栏。
+   */
+  status(leaseId: string, sid?: string, generation?: number): JsonMap {
+    const payload: JsonMap = {
+      lease_id: leaseId,
+    };
+    if (sid !== undefined) {
+      payload.sid = sid;
+    }
+    if (generation !== undefined) {
+      payload.generation = generation;
+    }
+    return this.callRaw("status", payload);
+  }
+
+  /**
+   * List active runtime leases and optionally filter by one SID.
+   * 列出活跃运行时租约，并可按单个 SID 过滤。
+   */
+  list(sid?: string): JsonMap {
+    const payload: JsonMap = {};
+    if (sid !== undefined) {
+      payload.sid = sid;
+    }
+    return this.callRaw("list", payload);
+  }
+
+  /**
+   * List active runtime-session handles rebuilt from the current lease listing payload.
+   * 基于当前租约列表载荷重建活跃运行时会话句柄列表。
+   */
+  listHandles(sid?: string): RuntimeSessionHandle[] {
+    const payload = this.list(sid);
+    const leases = payload.leases;
+    if (!Array.isArray(leases)) {
+      throw new Error("runtime session list payload is missing the leases array");
+    }
+    return leases.map((lease) => this.bindHandle(requireJsonMap(lease, "runtime session lease entry")));
+  }
+
+  /**
+   * Return the first active runtime-session handle for one SID when present.
+   * 返回某个 SID 的第一个活跃运行时会话句柄（如果存在）。
+   */
+  findHandle(sid: string): RuntimeSessionHandle | null {
+    const handles = this.listHandles(sid);
+    return handles.length > 0 ? handles[0] : null;
+  }
+
+  /**
+   * Close one runtime lease and return its final status payload with optional identity guards.
+   * 关闭单个运行时租约并返回其最终状态载荷，并可附带可选身份护栏。
+   */
+  close(leaseId: string, sid?: string, generation?: number): JsonMap {
+    const payload: JsonMap = {
+      lease_id: leaseId,
+    };
+    if (sid !== undefined) {
+      payload.sid = sid;
+    }
+    if (generation !== undefined) {
+      payload.generation = generation;
+    }
+    return this.callRaw("close", payload);
+  }
+
+  /**
+   * Return whether this helper will dispatch runtime-session requests to dedicated system entrypoints.
+   * 返回当前辅助器是否会把运行时会话请求分发到专用 system 入口。
+   */
+  usesSystemRuntimeSessionEndpoints(): boolean {
+    return this.authority !== undefined;
+  }
+
+  /**
+   * Resolve the concrete runtime-session JSON FFI entrypoint name for one logical action.
+   * 为单个逻辑动作解析具体的运行时会话 JSON FFI 入口名称。
+   */
+  private runtimeSessionFunctionName(action: string): string {
+    const publicName = `luaskills_ffi_runtime_session_${action}_json`;
+    if (this.authority === undefined) {
+      return publicName;
+    }
+    return `luaskills_ffi_system_runtime_session_${action}_json`;
+  }
+}
+
+/**
+ * Stable host-side runtime-session handle that carries lease identity guards automatically.
+ * 自动携带租约身份护栏的稳定宿主侧运行时会话句柄。
+ */
+export class RuntimeSessionHandle {
+  /**
+   * Bind one session client to one concrete lease identity triplet.
+   * 将一个会话客户端绑定到一个具体的租约身份三元组。
+   */
+  constructor(
+    private readonly sessions: RuntimeSessionClient,
+    readonly leaseId: string,
+    readonly sid: string,
+    readonly generation: number,
+  ) {}
+
+  /**
+   * Construct one runtime-session handle from one payload that contains identity fields.
+   * 从包含身份字段的一份载荷中构造一个运行时会话句柄。
+   */
+  static fromPayload(sessions: RuntimeSessionClient, payload: JsonMap): RuntimeSessionHandle {
+    return new RuntimeSessionHandle(
+      sessions,
+      requireRuntimeSessionStringField(payload, "lease_id"),
+      requireRuntimeSessionStringField(payload, "sid"),
+      requireRuntimeSessionNumberField(payload, "generation"),
+    );
+  }
+
+  /**
+   * Export the stable lease identity fields for persistence or raw FFI calls.
+   * 导出稳定租约身份字段，供持久化或原始 FFI 调用使用。
+   */
+  identityPayload(): RuntimeSessionIdentity {
+    return {
+      lease_id: this.leaseId,
+      sid: this.sid,
+      generation: this.generation,
+    };
+  }
+
+  /**
+   * Evaluate Lua code while automatically attaching the stored lease identity guards.
+   * 执行 Lua 代码时自动附带已保存的租约身份护栏。
+   */
+  eval(code: string, args: JsonMap = {}, timeoutMs = 60_000): JsonMap {
+    return this.sessions.eval(this.leaseId, code, args, timeoutMs, this.sid, this.generation);
+  }
+
+  /**
+   * Read the current lease status while automatically attaching the stored identity guards.
+   * 读取当前租约状态时自动附带已保存的身份护栏。
+   */
+  status(): JsonMap {
+    return this.sessions.status(this.leaseId, this.sid, this.generation);
+  }
+
+  /**
+   * Close the current lease while automatically attaching the stored identity guards.
+   * 关闭当前租约时自动附带已保存的身份护栏。
+   */
+  close(): JsonMap {
+    return this.sessions.close(this.leaseId, this.sid, this.generation);
+  }
+}
+
+/**
+ * Require one runtime-session payload to report success.
+ * 要求单个运行时会话载荷报告成功。
+ */
+export function requireRuntimeSessionOK(payload: JsonMap, action: string): JsonMap {
+  if (payload.ok === true) {
+    return payload;
+  }
+  throw new Error(
+    `${action} failed: ${String(payload.error_code ?? "unknown")}: ${String(payload.message ?? "Unknown runtime session error")}`,
+  );
+}
+
+/**
+ * Read one required runtime-session string field from one payload object.
+ * 从一份载荷对象中读取一个必填的运行时会话字符串字段。
+ */
+export function requireRuntimeSessionStringField(payload: JsonMap, fieldName: string): string {
+  const value = payload[fieldName];
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  throw new Error(`runtime session payload is missing required string field: ${fieldName}`);
+}
+
+/**
+ * Read one required runtime-session integer field from one payload object.
+ * 从一份载荷对象中读取一个必填的运行时会话整数字段。
+ */
+export function requireRuntimeSessionNumberField(payload: JsonMap, fieldName: string): number {
+  const value = payload[fieldName];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  throw new Error(`runtime session payload is missing required integer field: ${fieldName}`);
+}
+
+/**
+ * Require one arbitrary JSON value to be one plain object map.
+ * 要求某个任意 JSON 值必须是普通对象映射。
+ */
+function requireJsonMap(value: JsonValue, context: string): JsonMap {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return value as JsonMap;
+  }
+  throw new Error(`${context} must be one JSON object`);
 }
 
 /**
@@ -639,6 +1062,7 @@ export function defaultHostOptions(runtimeRoot: string): LuaRuntimeHostOptions {
     ignored_skill_ids: [],
     capabilities: {
       enable_skill_management_bridge: false,
+      enable_managed_io_compat: true,
     },
   };
   const manifest = loadRuntimeInstallManifestSync(root);

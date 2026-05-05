@@ -93,6 +93,11 @@ export interface LuaRuntimeCapabilityOptions {
    * Lua 内是否可使用 vulcan.runtime.skills。
    */
   enable_skill_management_bridge: boolean;
+  /**
+   * Whether the managed io compatibility layer is injected into Lua runtimes.
+   * 是否向 Lua 运行时注入托管 io 兼容层。
+   */
+  enable_managed_io_compat?: boolean;
 }
 
 /**

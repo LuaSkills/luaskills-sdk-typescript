@@ -52,6 +52,12 @@ node .\examples\host-tool-callback.mjs
 node .\examples\lifecycle.mjs
 ```
 
+`runtime-session.mjs` demonstrates one persistent runtime lease, authority-bound system queries, and repeated `eval` calls that reuse one interactive child-process handle.
+
+```powershell
+node .\examples\runtime-session.mjs
+```
+
 `provider-callback.mjs` registers a JSON SQLite provider callback before engine creation.
 
 ```powershell

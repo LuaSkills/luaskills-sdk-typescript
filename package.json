@@ -1,6 +1,6 @@
 {
   "name": "@luaskills/sdk",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "description": "TypeScript and Node.js SDK for integrating the LuaSkills runtime through the JSON FFI surface.",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,6 +25,7 @@
     "example:lifecycle": "node examples/lifecycle.mjs",
     "example:provider-callback": "node examples/provider-callback.mjs",
     "example:query": "node examples/query.mjs",
+    "example:runtime-session": "node examples/runtime-session.mjs",
     "prepack": "npm run build"
   },
   "keywords": [

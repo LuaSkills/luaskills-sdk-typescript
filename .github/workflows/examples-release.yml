@@ -56,6 +56,7 @@ jobs:
               "example:query": "node examples/query.mjs",
               "example:call": "node examples/call.mjs",
               "example:lifecycle": "node examples/lifecycle.mjs",
+              "example:runtime-session": "node examples/runtime-session.mjs",
               "example:provider-callback": "node examples/provider-callback.mjs"
             },
             "dependencies": {
@@ -75,6 +76,7 @@ jobs:
           npm run install-runtime
           npm run example:basic
           npm run example:query
+          npm run example:runtime-session
           \`\`\`
 
           Main repository: https://github.com/LuaSkills/luaskills
@@ -100,6 +102,7 @@ jobs:
           npm run example:query
           npm run example:call
           npm run example:lifecycle
+          npm run example:runtime-session
           npm run example:provider-callback
 
       - name: Package examples asset
@@ -130,7 +133,7 @@ jobs:
 
           This release contains a standalone examples package for the published npm package \`@luaskills/sdk@$VERSION\`.
 
-          The package was smoke-tested by installing the published SDK, installing LuaSkills runtime assets, and running the bundled examples.
+          The package was smoke-tested by installing the published SDK, installing LuaSkills runtime assets, and running the bundled examples, including the persistent runtime-session flow.
 
           Main repository: https://github.com/LuaSkills/luaskills
 
@@ -138,7 +141,7 @@ jobs:
 
           本 Release 包含面向已发布 npm 包 \`@luaskills/sdk@$VERSION\` 的独立示例包。
 
-          工作流已通过安装正式 SDK、安装 LuaSkills runtime 资产并运行内置示例完成冒烟验证。
+          工作流已通过安装正式 SDK、安装 LuaSkills runtime 资产并运行内置示例完成冒烟验证，其中包含持久 runtime-session 流程。
           MARKDOWN
 
       - name: Publish GitHub Release

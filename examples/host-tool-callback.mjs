@@ -1,5 +1,7 @@
-import { LuaSkillsClient, LuaSkillsJsonFfi } from "@luaskills/sdk";
+import { sdk } from "./load-sdk.mjs";
 import { resolve } from "node:path";
+
+const { LuaSkillsClient, LuaSkillsJsonFfi } = sdk;
 
 // Runtime root used by this host-tool callback example.
 // 当前宿主工具 callback 示例使用的 runtime root。

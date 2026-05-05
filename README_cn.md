@@ -163,16 +163,45 @@ npm run example:call
 npm run example:host-tool-callback
 npm run example:query
 npm run example:lifecycle
+npm run example:runtime-session
 npm run example:provider-callback
 ```
 
-query 与 lifecycle 示例使用内置夹具 skill：`examples/fixture-runtime/user_skills/demo-standard-ffi-skill`。请先把 runtime 资产安装到该 root：
+query、lifecycle 与 runtime-session 示例使用内置夹具 skill：`examples/fixture-runtime/user_skills/demo-standard-ffi-skill`。请先把 runtime 资产安装到该 root：
 
 ```powershell
 npx @luaskills/sdk install-runtime --database none --runtime-root .\examples\fixture-runtime
 ```
 
 完整示例索引与 runtime 注意事项见 [examples/README_cn.md](examples/README_cn.md)。英文示例指南见 [examples/README.md](examples/README.md)。
+
+## 持久运行时会话
+
+普通租约入口请使用 `client.runtimeSessions()`；如果宿主希望通过最新原生库提供的专用 system runtime-session 导出固定注入 authority，请使用 `client.system(authority).runtimeSessions()`。
+
+```ts
+import { Authority, LuaSkillsClient } from "@luaskills/sdk";
+
+const client = LuaSkillsClient.create({ runtimeRoot: "D:/runtime/luaskills" });
+
+try {
+  const sessions = client.system(Authority.System).runtimeSessions();
+  const session = sessions.createHandle("demo-session", 600, true);
+  const result = session.eval("counter = (counter or 0) + 1; return { counter = counter }");
+  console.log(result.result);
+  console.log(session.status());
+  console.log(session.close());
+} finally {
+  client.close();
+}
+```
+
+## 迁移说明
+
+- 现有 `client.system(authority)` 生命周期调用保持兼容；返回的 wrapper 现在额外暴露查询辅助方法和 `runtimeSessions()`。
+- `RuntimeSessionHandle` 会持久化 `lease_id + sid + generation`，并在 `eval`、`status`、`close` 时自动补回身份护栏。
+- `client.system(authority).runtimeSessions()` 依赖最新原生库提供的专用 `luaskills_ffi_system_runtime_session_*` 导出；如果这组导出缺失，会立即报错而不是静默降级。
+- 源码树示例现在会优先加载已安装发布包；拿不到时再回退到本地 `dist` 构建产物，因此仓库内烟测与独立 examples 包可以共用同一套脚本。
 
 ## JSON Provider Callback
 
@@ -413,8 +442,7 @@ SDK 覆盖公共 JSON FFI 主要入口：
 
 - version / describe
 - engine_new / engine_free
-- load_from_dirs / load_from_roots
-- reload_from_dirs / reload_from_roots
+- load_from_roots / reload_from_roots
 - list_entries / list_skill_help / render_skill_help_detail
 - prompt_argument_completions / is_skill / skill_name_for_tool
 - call_skill / run_lua
@@ -428,6 +456,8 @@ SDK 覆盖公共 JSON FFI 主要入口：
 ## 发布
 
 发布版本记录在 `VERSION`。发布前请保持 `VERSION`、`package.json` 与 `package-lock.json` 一致。
+
+如果要做生态统一发布，必须先发布同版本的 `LuaSkills/luaskills` GitHub release，确保本 SDK 默认安装器引用的 runtime 资产已经存在。
 
 发布前执行：
 
@@ -445,6 +475,8 @@ npm pack --dry-run
 - `bin`: `dist/cli.js`
 
 每次 npm publish 都必须使用新的 patch 版本；已发布版本不能覆盖。
+
+推荐统一发布顺序：`luaskills` 核心仓库 -> TypeScript SDK -> Python SDK -> Go SDK -> 各 SDK 的 examples release。
 
 npm 发布成功后，手动运行 GitHub Actions 里的 **Examples Release** 工作流。它会读取 `VERSION`，从 npm 安装 `@luaskills/sdk@{VERSION}`，安装 LuaSkills runtime 资产，运行示例冒烟测试，然后创建或更新 `examples-v{VERSION}` GitHub Release，并上传：
 

@@ -1,5 +1,7 @@
-import { LuaSkillsClient } from "@luaskills/sdk";
+import { sdk } from "./load-sdk.mjs";
 import { resolve } from "node:path";
+
+const { LuaSkillsClient } = sdk;
 
 const runtimeRoot = process.env.LUASKILLS_RUNTIME_ROOT ?? resolve("luaskills-runtime");
 const options = process.env.LUASKILLS_LIB

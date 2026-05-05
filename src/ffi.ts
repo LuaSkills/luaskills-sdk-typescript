@@ -2,7 +2,7 @@ import koffi from "koffi";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { resolveLuaSkillsLibraryPathFromRuntime } from "./runtime-assets.js";
-import type { JsonValue, LuaSkillsSdkOptions } from "./types.js";
+import type { FfiDescribeResult, JsonValue, LuaSkillsSdkOptions } from "./types.js";
 
 /**
  * Owned buffer shape returned by the LuaSkills JSON FFI.
@@ -540,6 +540,12 @@ export class LuaSkillsJsonFfi {
   private readonly providerOwnerToken = Symbol("LuaSkillsJsonFfiProviderOwner");
 
   /**
+   * Cached JSON FFI self-description used for diagnostics.
+   * 用于诊断的已缓存 JSON FFI 自描述。
+   */
+  private describeCache: FfiDescribeResult | null = null;
+
+  /**
    * Create one loaded JSON FFI bridge.
    * 创建一个已加载的 JSON FFI 桥。
    */
@@ -582,6 +588,17 @@ export class LuaSkillsJsonFfi {
     };
     const output = fn(input);
     return this.decodeEnvelope<T>(functionName, output);
+  }
+
+  /**
+   * Read and cache the exported JSON FFI descriptor payload for diagnostics.
+   * 读取并缓存已导出 JSON FFI 描述载荷，供诊断使用。
+   */
+  describe(): FfiDescribeResult {
+    if (this.describeCache === null) {
+      this.describeCache = this.callJsonNoInput<FfiDescribeResult>("luaskills_ffi_describe_json");
+    }
+    return this.describeCache;
   }
 
   /**
