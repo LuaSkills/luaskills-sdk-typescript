@@ -44,6 +44,8 @@ Default LuaSkills assets:
 - `luaskills-ffi-sdk-{platform}.tar.gz`: installed by default; provides the public FFI dynamic library, headers, and FFI licenses.
 - `lua-deps-{platform}.tar.gz`: not installed by the SDK; it is a build-time bundle for CI, source builds, or advanced native module rebuilds.
 
+The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime packages from the compatible `0.1` series by selecting the newest published patch automatically.
+
 ```powershell
 npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk install-runtime --database vldb-controller --runtime-root D:\runtime\luaskills
@@ -457,7 +459,7 @@ The SDK covers the public JSON FFI surface:
 
 The release version is stored in `VERSION`. Keep `VERSION`, `package.json`, and `package-lock.json` aligned before publishing.
 
-For one unified ecosystem release, publish `LuaSkills/luaskills` and the matching `LuaSkills/luaskills-packages` release first so the default runtime installer assets for this SDK already exist before npm goes live.
+For one unified ecosystem release, publish `LuaSkills/luaskills-packages` first, then publish `LuaSkills/luaskills`, so the default runtime installer assets for this SDK already exist before npm goes live.
 
 Before publishing:
 
@@ -476,7 +478,7 @@ The package exposes:
 
 Use a new patch version for every npm publish. Published versions cannot be overwritten.
 
-Recommended unified publish order: `luaskills` core release -> TypeScript SDK -> Python SDK -> Go SDK -> SDK examples releases.
+Recommended unified publish order: `luaskills-packages` -> `luaskills` core release -> TypeScript SDK -> Python SDK -> Go SDK -> SDK examples releases.
 
 After npm publishes successfully, run the GitHub Actions workflow **Examples Release** manually. It reads `VERSION`, installs `@luaskills/sdk@{VERSION}` from npm, installs LuaSkills runtime assets, runs the examples, then creates or updates the `examples-v{VERSION}` GitHub Release with:
 

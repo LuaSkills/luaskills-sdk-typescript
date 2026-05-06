@@ -44,6 +44,8 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 - `luaskills-ffi-sdk-{platform}.tar.gz`：默认安装；提供公共 FFI 动态库、头文件与 FFI 授权材料。
 - `lua-deps-{platform}.tar.gz`：SDK 不默认安装；它是 CI、源码构建或高级原生模块重建使用的构建期依赖包。
 
+默认情况下，SDK 会把 LuaSkills core 固定到自身对应版本，并从兼容的 `0.1` 协议线中自动解析最新已发布的 runtime packages patch 版本。
+
 ```powershell
 npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk install-runtime --database vldb-controller --runtime-root D:\runtime\luaskills
@@ -457,7 +459,7 @@ SDK 覆盖公共 JSON FFI 主要入口：
 
 发布版本记录在 `VERSION`。发布前请保持 `VERSION`、`package.json` 与 `package-lock.json` 一致。
 
-如果要做生态统一发布，必须先发布同版本的 `LuaSkills/luaskills` 与匹配的 `LuaSkills/luaskills-packages` GitHub release，确保本 SDK 默认安装器引用的 runtime 资产已经存在。
+如果要做生态统一发布，必须先发布 `LuaSkills/luaskills-packages`，再发布 `LuaSkills/luaskills`，确保本 SDK 默认安装器引用的 runtime 资产已经存在。
 
 发布前执行：
 
@@ -476,7 +478,7 @@ npm pack --dry-run
 
 每次 npm publish 都必须使用新的 patch 版本；已发布版本不能覆盖。
 
-推荐统一发布顺序：`luaskills` 核心仓库 -> TypeScript SDK -> Python SDK -> Go SDK -> 各 SDK 的 examples release。
+推荐统一发布顺序：`luaskills-packages` -> `luaskills` 核心仓库 -> TypeScript SDK -> Python SDK -> Go SDK -> 各 SDK 的 examples release。
 
 npm 发布成功后，手动运行 GitHub Actions 里的 **Examples Release** 工作流。它会读取 `VERSION`，从 npm 安装 `@luaskills/sdk@{VERSION}`，安装 LuaSkills runtime 资产，运行示例冒烟测试，然后创建或更新 `examples-v{VERSION}` GitHub Release，并上传：
 
