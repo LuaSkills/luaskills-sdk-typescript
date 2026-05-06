@@ -46,6 +46,15 @@ Default LuaSkills assets:
 
 The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime packages from the compatible `0.1` series by selecting the newest published patch automatically.
 
+## Upgrading from `0.2` to `0.3`
+
+If you are upgrading from the `0.2.x` line:
+
+- keep the SDK and LuaSkills core on the same `0.3.x` version line
+- expect Lua runtime packages and native deps to come from `LuaSkills/luaskills-packages`, not only from the main `luaskills` release
+- expect the installer to resolve the newest published patch from the compatible `0.1` packages series unless you pin an exact packages version
+- if you copied old runtime install scripts or release assumptions into your own project, update them to the split `core + packages` model
+
 ```powershell
 npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk install-runtime --database vldb-controller --runtime-root D:\runtime\luaskills
