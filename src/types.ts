@@ -204,6 +204,11 @@ export interface LuaRuntimeHostOptions {
    */
   host_provided_ffi_root: string | null;
   /**
+   * Optional fixed host-owned system_lua_lib directory.
+   * 可选固定宿主自有 system_lua_lib 目录。
+   */
+  system_lua_lib_dir: string | null;
+  /**
    * Optional download cache root.
    * 可选下载缓存根目录。
    */
@@ -345,6 +350,38 @@ export interface LuaInvocationContext {
 }
 
 /**
+ * Host-owned runtime-lease create options.
+ * 宿主拥有的运行时租约创建选项。
+ */
+export interface RuntimeLeaseCreateOptions {
+  /**
+   * Optional host-controlled lease working directory.
+   * 宿主控制的可选租约工作目录。
+   */
+  cwd?: string | null;
+  /**
+   * Optional workspace root recorded on the lease.
+   * 记录到租约中的可选工作区根目录。
+   */
+  workspace_root?: string | null;
+  /**
+   * Optional extra Lua module roots prepended to package.path.
+   * 前置追加到 package.path 的可选 Lua 模块根目录。
+   */
+  lua_roots?: string[];
+  /**
+   * Optional extra native module roots prepended to package.cpath.
+   * 前置追加到 package.cpath 的可选原生模块根目录。
+   */
+  c_roots?: string[];
+  /**
+   * Optional structured host-owned mount metadata.
+   * 可选结构化宿主挂载元数据。
+   */
+  mounts?: JsonValue;
+}
+
+/**
  * Runtime entry descriptor returned by listEntries.
  * listEntries 返回的运行时入口描述。
  */
@@ -414,6 +451,23 @@ export interface RuntimeEntryParameterDescriptor {
 }
 
 /**
+ * Structured host-side result returned alongside tool text content.
+ * 与工具文本结果一并返回的结构化宿主侧结果。
+ */
+export interface RuntimeHostResult {
+  /**
+   * Stable host-result kind identifier.
+   * 稳定宿主结果类型标识。
+   */
+  kind: string;
+  /**
+   * Arbitrary JSON payload consumed by the host.
+   * 由宿主消费的任意 JSON 载荷。
+   */
+  payload: JsonValue;
+}
+
+/**
  * Runtime invocation result returned by callSkill.
  * callSkill 返回的运行时调用结果。
  */
@@ -443,6 +497,11 @@ export interface RuntimeInvocationResult {
    * 内容行数。
    */
   content_lines: number;
+  /**
+   * Optional structured host-result payload.
+   * 可选结构化宿主结果载荷。
+   */
+  host_result: RuntimeHostResult | null;
 }
 
 /**

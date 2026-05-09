@@ -174,11 +174,12 @@ npm run example:call
 npm run example:host-tool-callback
 npm run example:query
 npm run example:lifecycle
-npm run example:runtime-session
+npm run example:runtime-lease
+npm run example:runtime-lease
 npm run example:provider-callback
 ```
 
-The query, lifecycle, and runtime-session examples use the bundled fixture skill at `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`. Install runtime assets into that root first:
+The query, lifecycle, and persistent runtime-lease examples use the bundled fixture skill at `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`. Install runtime assets into that root first:
 
 ```powershell
 npx @luaskills/sdk install-runtime --database none --runtime-root .\examples\fixture-runtime
@@ -186,9 +187,9 @@ npx @luaskills/sdk install-runtime --database none --runtime-root .\examples\fix
 
 See [examples/README.md](examples/README.md) for the full example index and runtime notes. The Chinese example guide is [examples/README_cn.md](examples/README_cn.md).
 
-## Persistent Runtime Sessions
+## Persistent Runtime Leases
 
-Use `client.runtimeSessions()` for the public lease endpoints, or `client.system(authority).runtimeSessions()` when the host wants fixed authority injection through the dedicated system runtime-session exports provided by the latest native library.
+Use `client.runtimeLeases()` for the public lease endpoints, or `client.system(authority).runtimeLeases()` when the host wants fixed authority injection through the dedicated system runtime-lease exports provided by the latest native library.
 
 ```ts
 import { Authority, LuaSkillsClient } from "@luaskills/sdk";
@@ -196,8 +197,11 @@ import { Authority, LuaSkillsClient } from "@luaskills/sdk";
 const client = LuaSkillsClient.create({ runtimeRoot: "D:/runtime/luaskills" });
 
 try {
-  const sessions = client.system(Authority.System).runtimeSessions();
-  const session = sessions.createHandle("demo-session", 600, true);
+  const leases = client.system(Authority.System).runtimeLeases();
+  const session = leases.createHandle("demo-session", 600, true, {
+    cwd: "D:/runtime/luaskills/system_lua_lib",
+    mounts: { channel: "demo" },
+  });
   const result = session.eval("counter = (counter or 0) + 1; return { counter = counter }");
   console.log(result.result);
   console.log(session.status());
@@ -209,9 +213,11 @@ try {
 
 ## Migration Notes
 
-- Existing `client.system(authority)` lifecycle calls keep working; the returned wrapper now also exposes query helpers and `runtimeSessions()`.
-- `RuntimeSessionHandle` persists `lease_id + sid + generation` and automatically reattaches identity guards on `eval`, `status`, and `close`.
-- `client.system(authority).runtimeSessions()` requires the dedicated `luaskills_ffi_system_runtime_session_*` exports from the latest native library and fails fast when they are missing.
+- Existing `client.system(authority)` lifecycle calls keep working; the returned wrapper now also exposes query helpers and `runtimeLeases()`.
+- `RuntimeLeaseHandle` persists `lease_id + sid + generation` and automatically reattaches identity guards on `eval`, `status`, and `close`.
+- `client.system(authority).runtimeLeases()` requires the dedicated `luaskills_ffi_system_runtime_lease_*` exports from the latest native library and fails fast when they are missing.
+- `callSkill()` now returns `host_result` when the host enables `request_context.client_capabilities.host_result`; structure-aware tools can emit one fourth return value for IDE-native result processing.
+- `runtimeLeases().create()` and `createHandle()` accept host-owned path options such as `cwd`, `workspace_root`, `lua_roots`, `c_roots`, and `mounts`.
 - Source-tree examples now load the published package when available and otherwise fall back to the local `dist` build, so the repository smoke path and standalone examples package use the same scripts.
 
 ## JSON Provider Callback

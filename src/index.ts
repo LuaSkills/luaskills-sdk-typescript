@@ -1,9 +1,9 @@
 export {
   type JsonMap,
   LuaSkillsClient,
-  RuntimeSessionClient,
-  RuntimeSessionHandle,
-  type RuntimeSessionIdentity,
+  RuntimeLeaseClient,
+  RuntimeLeaseHandle,
+  type RuntimeLeaseIdentity,
   SkillConfigClient,
   SkillManagementClient,
   SystemSkillManagementClient,
@@ -11,9 +11,9 @@ export {
   defaultHostOptions,
   defaultPoolConfig,
   defaultSpaceControllerOptions,
-  requireRuntimeSessionNumberField,
-  requireRuntimeSessionOK,
-  requireRuntimeSessionStringField,
+  requireRuntimeLeaseNumberField,
+  requireRuntimeLeaseOK,
+  requireRuntimeLeaseStringField,
   type RenderHelpOptions,
 } from "./client.js";
 export {

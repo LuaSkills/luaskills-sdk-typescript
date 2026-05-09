@@ -174,11 +174,12 @@ npm run example:call
 npm run example:host-tool-callback
 npm run example:query
 npm run example:lifecycle
-npm run example:runtime-session
+npm run example:runtime-lease
+npm run example:runtime-lease
 npm run example:provider-callback
 ```
 
-query、lifecycle 与 runtime-session 示例使用内置夹具 skill：`examples/fixture-runtime/user_skills/demo-standard-ffi-skill`。请先把 runtime 资产安装到该 root：
+query、lifecycle 与持久 runtime-lease 示例使用内置夹具 skill：`examples/fixture-runtime/user_skills/demo-standard-ffi-skill`。请先把 runtime 资产安装到该 root：
 
 ```powershell
 npx @luaskills/sdk install-runtime --database none --runtime-root .\examples\fixture-runtime
@@ -186,9 +187,9 @@ npx @luaskills/sdk install-runtime --database none --runtime-root .\examples\fix
 
 完整示例索引与 runtime 注意事项见 [examples/README_cn.md](examples/README_cn.md)。英文示例指南见 [examples/README.md](examples/README.md)。
 
-## 持久运行时会话
+## 持久运行时租约
 
-普通租约入口请使用 `client.runtimeSessions()`；如果宿主希望通过最新原生库提供的专用 system runtime-session 导出固定注入 authority，请使用 `client.system(authority).runtimeSessions()`。
+普通租约入口请使用 `client.runtimeLeases()`；如果宿主希望通过最新原生库提供的专用 system runtime-lease 导出固定注入 authority，请使用 `client.system(authority).runtimeLeases()`。
 
 ```ts
 import { Authority, LuaSkillsClient } from "@luaskills/sdk";
@@ -196,8 +197,11 @@ import { Authority, LuaSkillsClient } from "@luaskills/sdk";
 const client = LuaSkillsClient.create({ runtimeRoot: "D:/runtime/luaskills" });
 
 try {
-  const sessions = client.system(Authority.System).runtimeSessions();
-  const session = sessions.createHandle("demo-session", 600, true);
+  const leases = client.system(Authority.System).runtimeLeases();
+  const session = leases.createHandle("demo-session", 600, true, {
+    cwd: "D:/runtime/luaskills/system_lua_lib",
+    mounts: { channel: "demo" },
+  });
   const result = session.eval("counter = (counter or 0) + 1; return { counter = counter }");
   console.log(result.result);
   console.log(session.status());
@@ -209,9 +213,11 @@ try {
 
 ## 迁移说明
 
-- 现有 `client.system(authority)` 生命周期调用保持兼容；返回的 wrapper 现在额外暴露查询辅助方法和 `runtimeSessions()`。
-- `RuntimeSessionHandle` 会持久化 `lease_id + sid + generation`，并在 `eval`、`status`、`close` 时自动补回身份护栏。
-- `client.system(authority).runtimeSessions()` 依赖最新原生库提供的专用 `luaskills_ffi_system_runtime_session_*` 导出；如果这组导出缺失，会立即报错而不是静默降级。
+- 现有 `client.system(authority)` 生命周期调用保持兼容；返回的 wrapper 现在额外暴露查询辅助方法和 `runtimeLeases()`。
+- `RuntimeLeaseHandle` 会持久化 `lease_id + sid + generation`，并在 `eval`、`status`、`close` 时自动补回身份护栏。
+- `client.system(authority).runtimeLeases()` 依赖最新原生库提供的专用 `luaskills_ffi_system_runtime_lease_*` 导出；如果这组导出缺失，会立即报错而不是静默降级。
+- 当宿主在 `request_context.client_capabilities.host_result` 中显式开启结构化结果后，`callSkill()` 会返回 `host_result` 字段，结构化工具可以把 IDE 原生结果作为第四返回值带回。
+- `runtimeLeases().create()` 与 `createHandle()` 现在接受 `cwd`、`workspace_root`、`lua_roots`、`c_roots`、`mounts` 等宿主路径选项。
 - 源码树示例现在会优先加载已安装发布包；拿不到时再回退到本地 `dist` 构建产物，因此仓库内烟测与独立 examples 包可以共用同一套脚本。
 
 ## JSON Provider Callback

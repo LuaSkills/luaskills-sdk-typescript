@@ -6,7 +6,7 @@ const { Authority, LuaSkillsClient, RuntimeRoots } = sdk;
 
 // Stable session id reused by the example lease lifecycle.
 // 示例租约生命周期复用的稳定会话标识。
-const RUNTIME_SESSION_SID = "typescript-sdk-runtime-session-demo";
+const RUNTIME_SESSION_SID = "typescript-sdk-runtime-lease-demo";
 
 /**
  * Resolve the fixture runtime root used by this example.
@@ -28,8 +28,8 @@ function resolveSdkOptions(runtimeRoot) {
 }
 
 /**
- * Run one persistent runtime-session smoke flow through the high-level SDK surface.
- * 通过高级 SDK 接口执行一条持久运行时会话烟测链路。
+ * Run one persistent runtime-lease smoke flow through the high-level SDK surface.
+ * 通过高级 SDK 接口执行一条持久运行时租约烟测链路。
  */
 function main() {
   const runtimeRoot = resolveRuntimeRoot();
@@ -46,13 +46,16 @@ function main() {
       system.skillNameForTool("demo-standard-ffi-skill-ping"),
     );
 
-    const sessions = system.runtimeSessions();
+    const sessions = system.runtimeLeases();
     console.log(
-      "Uses dedicated system runtime-session endpoints:",
-      sessions.usesSystemRuntimeSessionEndpoints(),
+      "Uses dedicated system runtime-lease endpoints:",
+      sessions.usesSystemRuntimeLeaseEndpoints(),
     );
 
-    const session = sessions.createHandle(RUNTIME_SESSION_SID, 600, true);
+    const session = sessions.createHandle(RUNTIME_SESSION_SID, 600, true, {
+      cwd: `${runtimeRoot}/system_lua_lib`,
+      mounts: { example: "typescript-runtime-lease" },
+    });
     const identity = session.identityPayload();
     console.log("Lease created:", identity.lease_id);
     console.log("Lease handle count:", sessions.listHandles(RUNTIME_SESSION_SID).length);
@@ -78,7 +81,7 @@ if not proc then
   proc = vulcan.process.session.open(spec)
 end
 counter = (counter or 0) + 1
-proc:write((args.input or "runtime-session-demo") .. "\\n")
+proc:write((args.input or "runtime-lease-demo") .. "\\n")
 return {
   opened = true,
   counter = counter,
@@ -86,7 +89,7 @@ return {
 }
 `,
       {
-        input: "runtime-session-demo",
+        input: "runtime-lease-demo",
       },
     );
     console.log("Open eval result:", opened.result);

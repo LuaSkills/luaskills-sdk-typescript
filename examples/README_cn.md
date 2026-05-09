@@ -52,10 +52,10 @@ node .\examples\host-tool-callback.mjs
 node .\examples\lifecycle.mjs
 ```
 
-`runtime-session.mjs` 演示一个持久运行时租约、绑定 authority 的 system 查询，以及复用同一个交互式子进程句柄的连续 `eval` 调用。
+`runtime-lease.mjs` 演示一个持久运行时租约、绑定 authority 的 system 查询、租约创建路径选项，以及复用同一个交互式子进程句柄的连续 `eval` 调用。
 
 ```powershell
-node .\examples\runtime-session.mjs
+node .\examples\runtime-lease.mjs
 ```
 
 `provider-callback.mjs` 演示在 engine 创建前注册 JSON SQLite provider callback。
