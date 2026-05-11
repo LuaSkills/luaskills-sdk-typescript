@@ -46,14 +46,11 @@ Default LuaSkills assets:
 
 The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime packages from the compatible `0.1` series by selecting the newest published patch automatically.
 
-## Upgrading from `0.2` to `0.3`
+## Version Alignment
 
-If you are upgrading from the `0.2.x` line:
-
-- keep the SDK and LuaSkills core on the same `0.3.x` version line
-- expect Lua runtime packages and native deps to come from `LuaSkills/luaskills-packages`, not only from the main `luaskills` release
-- expect the installer to resolve the newest published patch from the compatible `0.1` packages series unless you pin an exact packages version
-- if you copied old runtime install scripts or release assumptions into your own project, update them to the split `core + packages` model
+- Keep the SDK and LuaSkills core on the same current release line whenever possible.
+- The current SDK defaults to LuaSkills core tag `v0.4.1`.
+- Runtime packages and native dependencies still come from the split `LuaSkills/luaskills-packages` and related release assets.
 
 ```powershell
 npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
@@ -217,6 +214,9 @@ try {
 - `RuntimeLeaseHandle` persists `lease_id + sid + generation` and automatically reattaches identity guards on `eval`, `status`, and `close`.
 - `client.system(authority).runtimeLeases()` requires the dedicated `luaskills_ffi_system_runtime_lease_*` exports from the latest native library and fails fast when they are missing.
 - `callSkill()` now returns `host_result` when the host enables `request_context.client_capabilities.host_result`; structure-aware tools can emit one fourth return value for IDE-native result processing.
+- When `host_result.kind === "change_set"`, hosts should treat `payload` as `RuntimeChangeSetPayload`.
+- Canonical `change_set` payloads now use file lifecycle records plus hunk-level `before + delete[] + insert[] + after` blocks for `modify` changes.
+- `create` and `delete` file records carry full-file `content`, while `rename` records carry `old_path` and `new_path`.
 - `runtimeLeases().create()` and `createHandle()` accept host-owned path options such as `cwd`, `workspace_root`, `lua_roots`, `c_roots`, and `mounts`.
 - Source-tree examples now load the published package when available and otherwise fall back to the local `dist` build, so the repository smoke path and standalone examples package use the same scripts.
 

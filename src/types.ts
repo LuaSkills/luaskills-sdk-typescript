@@ -461,10 +461,157 @@ export interface RuntimeHostResult {
    */
   kind: string;
   /**
-   * Arbitrary JSON payload consumed by the host.
-   * 由宿主消费的任意 JSON 载荷。
+   * Arbitrary JSON payload consumed by the host. Use RuntimeChangeSetPayload when kind is `change_set`.
+   * 由宿主消费的任意 JSON 载荷。当 kind 为 `change_set` 时应使用 RuntimeChangeSetPayload。
    */
   payload: JsonValue;
+}
+
+/**
+ * One canonical change-set line record.
+ * 单条 canonical change_set 行记录。
+ */
+export interface RuntimeChangeSetLine {
+  /**
+   * One 1-based file line number.
+   * 单个从 1 开始的文件行号。
+   */
+  line: number;
+  /**
+   * Exact line content stored for this record.
+   * 当前记录保存的精确行内容。
+   */
+  content: string;
+}
+
+/**
+ * One canonical change-set modify hunk.
+ * 单个 canonical change_set modify hunk。
+ */
+export interface RuntimeChangeSetHunk {
+  /**
+   * Contiguous context immediately before the changed block.
+   * 紧贴修改块之前的连续上下文。
+   */
+  before: string;
+  /**
+   * Deleted old-file lines recorded in ascending order.
+   * 按升序记录的旧文件删除行。
+   */
+  delete: RuntimeChangeSetLine[];
+  /**
+   * Inserted new-file lines recorded in ascending order.
+   * 按升序记录的新文件插入行。
+   */
+  insert: RuntimeChangeSetLine[];
+  /**
+   * Contiguous context immediately after the changed block.
+   * 紧贴修改块之后的连续上下文。
+   */
+  after: string;
+}
+
+/**
+ * One canonical change-set diagnostic record.
+ * 单条 canonical change_set 诊断记录。
+ */
+export interface RuntimeChangeSetDiagnostic {
+  /**
+   * Structured diagnostic level.
+   * 结构化诊断级别。
+   */
+  level: string;
+  /**
+   * Human-readable diagnostic message.
+   * 人类可读诊断消息。
+   */
+  message: string;
+}
+
+/**
+ * One canonical change-set file record.
+ * 单个 canonical change_set 文件记录。
+ */
+export interface RuntimeChangeSetFile {
+  /**
+   * File lifecycle change kind.
+   * 文件生命周期变更类型。
+   */
+  change: "create" | "modify" | "delete" | "rename";
+  /**
+   * Absolute file path used by create, modify, and delete records.
+   * create、modify、delete 记录使用的绝对文件路径。
+   */
+  path?: string;
+  /**
+   * Absolute old path used by rename records.
+   * rename 记录使用的旧绝对路径。
+   */
+  old_path?: string;
+  /**
+   * Absolute new path used by rename records.
+   * rename 记录使用的新绝对路径。
+   */
+  new_path?: string;
+  /**
+   * Full-file content used by create and delete records.
+   * create 与 delete 记录使用的整文件内容。
+   */
+  content?: string;
+  /**
+   * Explicit modify hunks used by modify records.
+   * modify 记录使用的显式修改 hunk 列表。
+   */
+  hunks?: RuntimeChangeSetHunk[];
+  /**
+   * Optional human-readable patch mirror.
+   * 可选的人类可读 patch 镜像。
+   */
+  patch?: string | null;
+}
+
+/**
+ * Canonical `change_set` payload consumed by IDE-aware hosts.
+ * IDE 感知宿主消费的 canonical `change_set` 载荷。
+ */
+export interface RuntimeChangeSetPayload {
+  /**
+   * Whether the result is one preview or applied change-set.
+   * 当前结果是预览态还是已应用态。
+   */
+  mode: "preview" | "applied";
+  /**
+   * Optional high-level change summary.
+   * 可选的高层变更摘要。
+   */
+  summary?: string | null;
+  /**
+   * Required file lifecycle records.
+   * 必填的文件生命周期记录列表。
+   */
+  files: RuntimeChangeSetFile[];
+  /**
+   * Optional diagnostics returned alongside the change-set.
+   * 随 change_set 一并返回的可选诊断列表。
+   */
+  diagnostics?: RuntimeChangeSetDiagnostic[];
+}
+
+/**
+ * Runtime host-result envelope specialized for canonical `change_set`.
+ * 专用于 canonical `change_set` 的运行时宿主结果包络。
+ */
+export interface RuntimeChangeSetHostResult {
+  /**
+   * Canonical host-result kind identifier.
+   * canonical 宿主结果类型标识。
+   */
+  kind: "change_set";
+  /**
+   * Canonical change-set payload.
+   * canonical change_set 载荷。
+   */
+  payload: RuntimeChangeSetPayload;
 }
 
 /**

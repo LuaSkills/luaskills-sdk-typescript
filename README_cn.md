@@ -46,14 +46,11 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 
 默认情况下，SDK 会把 LuaSkills core 固定到自身对应版本，并从兼容的 `0.1` 协议线中自动解析最新已发布的 runtime packages patch 版本。
 
-## 从 `0.2` 升级到 `0.3`
+## 版本对齐
 
-如果你正在从 `0.2.x` 升级：
-
-- 让 SDK 与 LuaSkills core 保持同一条 `0.3.x` 版本线
-- 接受 Lua runtime packages 与 native deps 来自 `LuaSkills/luaskills-packages`，而不是只来自主仓库 release
-- 默认安装器现在会从兼容的 `0.1` packages 协议线自动解析最新 patch；只有显式指定时才会固定到具体版本
-- 如果你在自己的项目里复制过旧的 runtime 安装脚本或旧的发布假设，需要同步切到 `core + packages` 的拆分模型
+- 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
+- 当前 SDK 默认指向 LuaSkills core 标签 `v0.4.1`。
+- runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
 
 ```powershell
 npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
@@ -217,6 +214,9 @@ try {
 - `RuntimeLeaseHandle` 会持久化 `lease_id + sid + generation`，并在 `eval`、`status`、`close` 时自动补回身份护栏。
 - `client.system(authority).runtimeLeases()` 依赖最新原生库提供的专用 `luaskills_ffi_system_runtime_lease_*` 导出；如果这组导出缺失，会立即报错而不是静默降级。
 - 当宿主在 `request_context.client_capabilities.host_result` 中显式开启结构化结果后，`callSkill()` 会返回 `host_result` 字段，结构化工具可以把 IDE 原生结果作为第四返回值带回。
+- 当 `host_result.kind === "change_set"` 时，宿主应把 `payload` 按 `RuntimeChangeSetPayload` 解析。
+- canonical `change_set` 现在使用文件生命周期记录；`modify` 通过 hunk 级 `before + delete[] + insert[] + after` 表达具体修改。
+- `create` 与 `delete` 文件记录直接携带整文件 `content`，`rename` 记录携带 `old_path` 与 `new_path`。
 - `runtimeLeases().create()` 与 `createHandle()` 现在接受 `cwd`、`workspace_root`、`lua_roots`、`c_roots`、`mounts` 等宿主路径选项。
 - 源码树示例现在会优先加载已安装发布包；拿不到时再回退到本地 `dist` 构建产物，因此仓库内烟测与独立 examples 包可以共用同一套脚本。
 
