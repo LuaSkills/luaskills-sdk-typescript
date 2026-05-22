@@ -49,7 +49,7 @@ The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime p
 ## Version Alignment
 
 - Keep the SDK and LuaSkills core on the same current release line whenever possible.
-- The current SDK defaults to LuaSkills core tag `v0.4.2`.
+- The current SDK defaults to LuaSkills core tag `v0.4.3`.
 - Runtime packages and native dependencies still come from the split `LuaSkills/luaskills-packages` and related release assets.
 
 ```powershell

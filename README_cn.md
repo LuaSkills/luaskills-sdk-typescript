@@ -49,7 +49,7 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 ## 版本对齐
 
 - 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
-- 当前 SDK 默认指向 LuaSkills core 标签 `v0.4.2`。
+- 当前 SDK 默认指向 LuaSkills core 标签 `v0.4.3`。
 - runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
 
 ```powershell

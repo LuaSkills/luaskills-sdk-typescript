@@ -421,6 +421,11 @@ export interface RuntimeEntryDescriptor {
    * 入口参数描述。
    */
   parameters: RuntimeEntryParameterDescriptor[];
+  /**
+   * Final AI-facing input schema resolved by the runtime.
+   * 运行时解析后的最终面向 AI 输入 schema。
+   */
+  input_schema: JsonValue;
 }
 
 /**
