@@ -174,6 +174,11 @@ export interface LuaRuntimeSpaceControllerOptions {
  */
 export interface LuaRuntimeHostOptions {
   /**
+   * Canonical runtime root used to derive the fixed LuaSkills layout.
+   * 用于推导固定 LuaSkills 布局的规范 runtime root。
+   */
+  runtime_root: string | null;
+  /**
    * Temporary directory used by runtime helpers.
    * 运行时辅助功能使用的临时目录。
    */

@@ -72,11 +72,13 @@ export class RuntimeRoots {
       join(absoluteRoot, "temp", "downloads"),
       join(absoluteRoot, "resources"),
       join(absoluteRoot, "lua_packages"),
-      join(absoluteRoot, "bin", "tools"),
+      join(absoluteRoot, "bin"),
       join(absoluteRoot, "libs"),
       join(absoluteRoot, "dependencies"),
       join(absoluteRoot, "state"),
       join(absoluteRoot, "databases"),
+      join(absoluteRoot, "config"),
+      join(absoluteRoot, "system_lua_lib"),
       ...skillRoots.map((root) => root.skills_dir),
     ];
     for (const directory of directories) {
