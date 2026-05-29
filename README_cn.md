@@ -49,7 +49,7 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 ## 版本对齐
 
 - 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
-- 当前 SDK 默认指向 LuaSkills core 标签 `v0.4.5`。
+- 当前 SDK 默认指向 LuaSkills core 标签 `v0.4.6`。
 - runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
 - SDK 默认 host options 现在只传 `runtime_root`；LuaSkills 会自动推导 `bin`、`libs`、`lua_packages`、`resources`、`skills`、`temp`、`dependencies`、`state`、`databases`、`config` 与 `system_lua_lib`。
 - 宿主工具直接放在 `runtime_root/bin`，不再放到 `runtime_root/bin/tools`。

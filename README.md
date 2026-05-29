@@ -49,7 +49,7 @@ The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime p
 ## Version Alignment
 
 - Keep the SDK and LuaSkills core on the same current release line whenever possible.
-- The current SDK defaults to LuaSkills core tag `v0.4.5`.
+- The current SDK defaults to LuaSkills core tag `v0.4.6`.
 - Runtime packages and native dependencies still come from the split `LuaSkills/luaskills-packages` and related release assets.
 - SDK default host options now pass only `runtime_root`; LuaSkills derives `bin`, `libs`, `lua_packages`, `resources`, `skills`, `temp`, `dependencies`, `state`, `databases`, `config`, and `system_lua_lib`.
 - Host tools live directly under `runtime_root/bin`, not `runtime_root/bin/tools`.
