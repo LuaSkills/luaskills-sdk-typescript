@@ -38,10 +38,20 @@ export enum SkillInstallSourceType {
    */
   Github = "github",
   /**
+   * Official LuaSkills Hub managed skill.
+   * 官方 LuaSkills Hub 的受管理 skill。
+   */
+  OfficialHub = "official_hub",
+  /**
    * Remote source descriptor URL.
    * 远程 source 描述文件 URL。
    */
   Url = "url",
+  /**
+   * Host-private URL manifest managed skill.
+   * 宿主私有 URL manifest 受管理 skill。
+   */
+  PrivateUrlManifest = "private_url_manifest",
 }
 
 /**
@@ -384,6 +394,24 @@ export interface RuntimeLeaseCreateOptions {
    * 可选结构化宿主挂载元数据。
    */
   mounts?: JsonValue;
+  /**
+   * Required trusted package descriptor for System runtime leases.
+   * System 运行时租约必需的可信包描述符。
+   */
+  system_package?: SystemRuntimePackage;
+}
+
+/**
+ * Trusted System Plugin package descriptor required by the System lease create endpoint.
+ * System 租约创建端点强制要求的可信 System Plugin 包描述符。
+ */
+export interface SystemRuntimePackage {
+  /** Stable package identifier. / 稳定包标识符。 */
+  id: string;
+  /** Absolute trusted package root. / 绝对可信包根目录。 */
+  root: string;
+  /** Package-relative dependency manifest path. / 包相对依赖清单路径。 */
+  dependencies_file: string;
 }
 
 /**
@@ -677,10 +705,10 @@ export interface SkillInstallRequest {
    */
   source?: string | null;
   /**
-   * Managed source type.
-   * 受管来源类型。
+   * Required managed source type.
+   * 必填受管来源类型。
    */
-  source_type?: SkillInstallSourceType | `${SkillInstallSourceType}`;
+  source_type: SkillInstallSourceType | `${SkillInstallSourceType}`;
 }
 
 /**
@@ -1088,6 +1116,18 @@ export interface SkillLifecycleOptions {
    * system 入口使用的可选宿主注入权限。
    */
   authority?: Authority | `${Authority}`;
+}
+
+/**
+ * Options accepted by host-private URL-manifest lifecycle wrappers.
+ * 宿主私有 URL manifest 生命周期封装接受的选项。
+ */
+export interface PrivateUrlManifestSkillOptions {
+  /**
+   * Optional explicit target root.
+   * 可选显式目标 root。
+   */
+  targetRoot?: RuntimeSkillRoot | null;
 }
 
 /**

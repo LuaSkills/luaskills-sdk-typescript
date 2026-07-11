@@ -2,9 +2,11 @@ export {
   type JsonMap,
   LuaSkillsClient,
   RuntimeLeaseClient,
+  type RuntimeLeaseAction,
   RuntimeLeaseHandle,
   type RuntimeLeaseIdentity,
   SkillConfigClient,
+  type SkillLifecycleAction,
   SkillManagementClient,
   SystemSkillManagementClient,
   createEngineOptions,
@@ -36,6 +38,10 @@ export {
   type RuntimeModelLlmRequest,
   type RuntimeModelLlmResponse,
   type RuntimeModelUsage,
+  type SkillOperationProgressAction,
+  type SkillOperationProgressCallback,
+  type SkillOperationProgressEvent,
+  type SkillOperationProgressPlane,
 } from "./ffi.js";
 export { RuntimeRoots } from "./roots.js";
 export * from "./runtime-assets.js";

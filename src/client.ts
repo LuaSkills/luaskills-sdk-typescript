@@ -1,9 +1,10 @@
 import { join, resolve } from "node:path";
-import { LuaSkillsJsonFfi } from "./ffi.js";
+import { LuaSkillsJsonFfi, type ManagedSessionWakeCallback } from "./ffi.js";
 import { RuntimeRoots } from "./roots.js";
 import { hostOptionsFromRuntimeManifest, loadRuntimeInstallManifestSync } from "./runtime-assets.js";
 import {
   Authority,
+  SkillInstallSourceType,
   type BooleanResult,
   type EngineHandleResult,
   type FfiDescribeResult,
@@ -19,6 +20,7 @@ import {
   type LuaSkillsSdkOptions,
   type LuaVmPoolConfig,
   type OptionalSkillNameResult,
+  type PrivateUrlManifestSkillOptions,
   type RuntimeAckResult,
   type RuntimeEntryDescriptor,
   type RuntimeHelpDetail,
@@ -53,10 +55,73 @@ type HostOptionsOverride = Partial<Omit<LuaRuntimeHostOptions, "space_controller
 };
 
 /**
+ * Private constructor token that prevents direct JavaScript construction of SDK clients.
+ * 阻止 JavaScript 直接构造 SDK 客户端的私有构造令牌。
+ */
+const LUA_SKILLS_CLIENT_CONSTRUCTOR_TOKEN = Symbol("LuaSkillsClient.constructor");
+
+/**
+ * Private SDK-internal call token for engine-bound child namespaces.
+ * 用于绑定 engine 子命名空间的 SDK 内部私有调用令牌。
+ */
+const LUA_SKILLS_CLIENT_CALL_TOKEN = Symbol("LuaSkillsClient.callJson");
+
+/**
  * Generic JSON object payload used by runtime-lease and system helpers.
  * 运行时租约与 system 辅助器使用的通用 JSON 对象载荷。
  */
 export type JsonMap = Record<string, JsonValue | undefined>;
+
+/**
+ * Supported skill lifecycle JSON FFI action names.
+ * 受支持的 skill 生命周期 JSON FFI 动作名称。
+ */
+export type SkillLifecycleAction = "disable_skill" | "enable_skill" | "uninstall_skill" | "install_skill" | "update_skill";
+
+/**
+ * Runtime whitelist for skill lifecycle FFI name construction.
+ * skill 生命周期 FFI 函数名构造的运行时白名单。
+ */
+const SKILL_LIFECYCLE_ACTIONS: ReadonlySet<SkillLifecycleAction> = new Set([
+  "disable_skill",
+  "enable_skill",
+  "uninstall_skill",
+  "install_skill",
+  "update_skill",
+]);
+
+/**
+ * Exact Rust SkillInstallRequest JSON keys accepted by SDK lifecycle wrappers.
+ * SDK 生命周期封装接受的精确 Rust SkillInstallRequest JSON 键。
+ */
+const SKILL_INSTALL_REQUEST_KEYS: ReadonlySet<string> = new Set(["skill_id", "source", "source_type"]);
+
+/**
+ * Source types whose source locator is parsed as an absolute remote URL.
+ * source 定位值会被解析为绝对远程 URL 的来源类型。
+ */
+const URL_SKILL_INSTALL_SOURCE_TYPES: ReadonlySet<string> = new Set([
+  SkillInstallSourceType.Url,
+  SkillInstallSourceType.PrivateUrlManifest,
+]);
+
+/**
+ * Supported runtime-lease JSON FFI action names.
+ * 受支持的运行时租约 JSON FFI 动作名称。
+ */
+export type RuntimeLeaseAction = "create" | "eval" | "status" | "list" | "close";
+
+/**
+ * Runtime whitelist for runtime-lease raw dispatch actions.
+ * 运行时租约原始分发动作的运行时白名单。
+ */
+const RUNTIME_LEASE_ACTIONS: ReadonlySet<RuntimeLeaseAction> = new Set([
+  "create",
+  "eval",
+  "status",
+  "list",
+  "close",
+]);
 
 /**
  * Options accepted by runtime help rendering.
@@ -87,12 +152,6 @@ export class LuaSkillsClient {
   readonly ffi: LuaSkillsJsonFfi;
 
   /**
-   * Stable numeric engine handle stored inside the native FFI registry.
-   * 存放在原生 FFI 注册表中的稳定数值引擎句柄。
-   */
-  readonly engineId: number;
-
-  /**
    * Skill-config API namespace.
    * skill 配置 API 命名空间。
    */
@@ -105,20 +164,69 @@ export class LuaSkillsClient {
   readonly skills: SkillManagementClient;
 
   /**
+   * Stable numeric engine handle stored inside the native FFI registry.
+   * 存放在原生 FFI 注册表中的稳定数值引擎句柄。
+   */
+  #engineId: number;
+
+  /**
+   * Number of active engine-bound FFI calls currently using the native handle.
+   * 当前正在使用原生句柄的绑定 engine FFI 调用数量。
+   */
+  #activeCalls = 0;
+
+  /**
+   * Whether this client is currently freeing the native engine handle.
+   * 当前客户端是否正在释放原生引擎句柄。
+   */
+  #closing = false;
+
+  /**
    * Whether the native engine handle has already been released.
    * 原生引擎句柄是否已经被释放。
    */
-  private closed = false;
+  #closed = false;
 
   /**
    * Create one SDK client around an already-created engine id.
    * 围绕已创建的 engine id 创建一个 SDK 客户端。
    */
-  private constructor(ffi: LuaSkillsJsonFfi, engineId: number) {
+  private constructor(ffi: LuaSkillsJsonFfi, engineId: number, constructorToken: symbol) {
+    if (constructorToken !== LUA_SKILLS_CLIENT_CONSTRUCTOR_TOKEN) {
+      throw new TypeError("LuaSkillsClient must be created with LuaSkillsClient.create");
+    }
     this.ffi = ffi;
-    this.engineId = engineId;
+    this.#engineId = engineId;
+    // Define an own non-configurable accessor so external code cannot shadow the real handle on client instances.
+    // 在实例上定义不可配置访问器，避免外部代码覆盖客户端实例上的真实句柄。
+    Object.defineProperty(this, "engineId", {
+      configurable: false,
+      enumerable: true,
+      get: () => this.#engineId,
+    });
     this.config = new SkillConfigClient(this);
     this.skills = new SkillManagementClient(this, false);
+  }
+
+  /**
+   * Return the immutable native engine handle identifier.
+   * 返回不可变的原生引擎句柄标识符。
+   */
+  get engineId(): number {
+    return this.#engineId;
+  }
+
+  /**
+   * Call one engine-bound JSON FFI function after checking the lifecycle state.
+   * 检查生命周期状态后调用一个绑定 engine 的 JSON FFI 函数。
+   *
+   * @internal
+   */
+  callJson<T>(functionName: string, payload: JsonValue | Record<string, unknown>, callToken: symbol): T {
+    if (callToken !== LUA_SKILLS_CLIENT_CALL_TOKEN) {
+      throw new TypeError("LuaSkillsClient.callJson is reserved for SDK internals");
+    }
+    return this.#callJson<T>(functionName, payload);
   }
 
   /**
@@ -135,7 +243,7 @@ export class LuaSkillsClient {
     const result = ffi.callJson<EngineHandleResult>("luaskills_ffi_engine_new_json", {
       options: engineOptions,
     });
-    return new LuaSkillsClient(ffi, result.engine_id);
+    return new LuaSkillsClient(ffi, result.engine_id, LUA_SKILLS_CLIENT_CONSTRUCTOR_TOKEN);
   }
 
   /**
@@ -152,6 +260,48 @@ export class LuaSkillsClient {
    */
   static describe(options: LuaSkillsSdkOptions = {}): FfiDescribeResult {
     return new LuaSkillsJsonFfi(options).callJsonNoInput<FfiDescribeResult>("luaskills_ffi_describe_json");
+  }
+
+  /**
+   * Destructively drain one bounded engine-level managed-session event batch.
+   * 以破坏性方式排空一批有界的引擎级受管会话事件。
+   */
+  pollManagedSessionEvents(maxEvents: number, authority: Authority = Authority.System): JsonMap {
+    if (!Number.isSafeInteger(maxEvents) || maxEvents <= 0) {
+      throw new Error("max_events must be one positive safe integer");
+    }
+    return this.#callJson<JsonMap>("luaskills_ffi_managed_session_events_poll_json", {
+      engine_id: this.#engineId,
+      max_events: maxEvents,
+      authority,
+    });
+  }
+
+  /**
+   * Wait for and destructively drain one bounded engine-level managed-session event batch.
+   * 等待并以破坏性方式排空一批有界的引擎级受管会话事件。
+   */
+  waitManagedSessionEvents(maxEvents: number, timeoutMs: number, authority: Authority = Authority.System): JsonMap {
+    if (!Number.isSafeInteger(maxEvents) || maxEvents <= 0) {
+      throw new Error("max_events must be one positive safe integer");
+    }
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+      throw new Error("timeout_ms must be one non-negative safe integer");
+    }
+    return this.#callJson<JsonMap>("luaskills_ffi_managed_session_events_wait_json", {
+      engine_id: this.#engineId,
+      max_events: maxEvents,
+      timeout_ms: timeoutMs,
+      authority,
+    });
+  }
+
+  /**
+   * Register, replace, or clear this engine's managed-session wake callback.
+   * 注册、替换或清除当前引擎的受管会话唤醒回调。
+   */
+  setManagedSessionWakeCallback(callback: ManagedSessionWakeCallback | null): void {
+    this.ffi.setManagedSessionWakeCallback(this.#engineId, callback);
   }
 
   /**
@@ -191,9 +341,8 @@ export class LuaSkillsClient {
    * 从正式有序 root 链加载 skills。
    */
   loadFromRoots(skillRoots: RuntimeSkillRoot[]): RuntimeAckResult {
-    this.assertOpen();
-    return this.ffi.callJson<RuntimeAckResult>("luaskills_ffi_load_from_roots_json", {
-      engine_id: this.engineId,
+    return this.#callJson<RuntimeAckResult>("luaskills_ffi_load_from_roots_json", {
+      engine_id: this.#engineId,
       skill_roots: skillRoots,
     });
   }
@@ -203,9 +352,8 @@ export class LuaSkillsClient {
    * 从正式有序 root 链重载 skills。
    */
   reloadFromRoots(skillRoots: RuntimeSkillRoot[]): RuntimeAckResult {
-    this.assertOpen();
-    return this.ffi.callJson<RuntimeAckResult>("luaskills_ffi_reload_from_roots_json", {
-      engine_id: this.engineId,
+    return this.#callJson<RuntimeAckResult>("luaskills_ffi_reload_from_roots_json", {
+      engine_id: this.#engineId,
       skill_roots: skillRoots,
     });
   }
@@ -215,9 +363,8 @@ export class LuaSkillsClient {
    * 列出指定权限可见的运行时入口。
    */
   listEntries(authority: Authority | `${Authority}` = Authority.DelegatedTool): RuntimeEntryDescriptor[] {
-    this.assertOpen();
-    return this.ffi.callJson<RuntimeEntryDescriptor[]>("luaskills_ffi_list_entries_json", {
-      engine_id: this.engineId,
+    return this.#callJson<RuntimeEntryDescriptor[]>("luaskills_ffi_list_entries_json", {
+      engine_id: this.#engineId,
       authority,
     });
   }
@@ -227,9 +374,8 @@ export class LuaSkillsClient {
    * 列出指定权限可见的运行时帮助树。
    */
   listSkillHelp(authority: Authority | `${Authority}` = Authority.DelegatedTool): RuntimeSkillHelpDescriptor[] {
-    this.assertOpen();
-    return this.ffi.callJson<RuntimeSkillHelpDescriptor[]>("luaskills_ffi_list_skill_help_json", {
-      engine_id: this.engineId,
+    return this.#callJson<RuntimeSkillHelpDescriptor[]>("luaskills_ffi_list_skill_help_json", {
+      engine_id: this.#engineId,
       authority,
     });
   }
@@ -243,9 +389,8 @@ export class LuaSkillsClient {
     flowName = "main",
     options: RenderHelpOptions = {},
   ): RuntimeHelpDetail | null {
-    this.assertOpen();
-    return this.ffi.callJson<RuntimeHelpDetail | null>("luaskills_ffi_render_skill_help_detail_json", {
-      engine_id: this.engineId,
+    return this.#callJson<RuntimeHelpDetail | null>("luaskills_ffi_render_skill_help_detail_json", {
+      engine_id: this.#engineId,
       skill_id: skillId,
       flow_name: flowName,
       request_context: options.requestContext ?? null,
@@ -262,9 +407,8 @@ export class LuaSkillsClient {
     argumentName: string,
     authority: Authority | `${Authority}` = Authority.DelegatedTool,
   ): string[] | null {
-    this.assertOpen();
-    return this.ffi.callJson<string[] | null>("luaskills_ffi_prompt_argument_completions_json", {
-      engine_id: this.engineId,
+    return this.#callJson<string[] | null>("luaskills_ffi_prompt_argument_completions_json", {
+      engine_id: this.#engineId,
       prompt_name: promptName,
       argument_name: argumentName,
       authority,
@@ -276,9 +420,8 @@ export class LuaSkillsClient {
    * 返回指定 canonical 工具名对所选权限是否可见为 skill 入口。
    */
   isSkill(toolName: string, authority: Authority | `${Authority}` = Authority.DelegatedTool): boolean {
-    this.assertOpen();
-    const result = this.ffi.callJson<BooleanResult>("luaskills_ffi_is_skill_json", {
-      engine_id: this.engineId,
+    const result = this.#callJson<BooleanResult>("luaskills_ffi_is_skill_json", {
+      engine_id: this.#engineId,
       tool_name: toolName,
       authority,
     });
@@ -293,9 +436,8 @@ export class LuaSkillsClient {
     toolName: string,
     authority: Authority | `${Authority}` = Authority.DelegatedTool,
   ): string | null {
-    this.assertOpen();
-    const result = this.ffi.callJson<OptionalSkillNameResult>("luaskills_ffi_skill_name_for_tool_json", {
-      engine_id: this.engineId,
+    const result = this.#callJson<OptionalSkillNameResult>("luaskills_ffi_skill_name_for_tool_json", {
+      engine_id: this.#engineId,
       tool_name: toolName,
       authority,
     });
@@ -311,9 +453,8 @@ export class LuaSkillsClient {
     args: JsonValue = {},
     invocationContext?: LuaInvocationContext,
   ): RuntimeInvocationResult {
-    this.assertOpen();
-    return this.ffi.callJson<RuntimeInvocationResult>("luaskills_ffi_call_skill_json", {
-      engine_id: this.engineId,
+    return this.#callJson<RuntimeInvocationResult>("luaskills_ffi_call_skill_json", {
+      engine_id: this.#engineId,
       tool_name: toolName,
       args,
       invocation_context: normalizeInvocationContext(invocationContext),
@@ -325,9 +466,8 @@ export class LuaSkillsClient {
    * 针对当前活动运行时执行单段内联 Lua。
    */
   runLua<T = JsonValue>(code: string, args: JsonValue = {}, invocationContext?: LuaInvocationContext): T {
-    this.assertOpen();
-    return this.ffi.callJson<T>("luaskills_ffi_run_lua_json", {
-      engine_id: this.engineId,
+    return this.#callJson<T>("luaskills_ffi_run_lua_json", {
+      engine_id: this.#engineId,
       code,
       args,
       invocation_context: normalizeInvocationContext(invocationContext),
@@ -339,23 +479,67 @@ export class LuaSkillsClient {
    * 释放原生引擎句柄。
    */
   close(): RuntimeAckResult | null {
-    if (this.closed) {
+    if (this.#closed) {
       return null;
     }
-    const result = this.ffi.callJson<RuntimeAckResult>("luaskills_ffi_engine_free_json", {
-      engine_id: this.engineId,
-    });
-    this.closed = true;
-    return result;
+    if (this.#closing) {
+      throw new Error(`LuaSkills engine ${this.#engineId} is closing`);
+    }
+    if (this.#activeCalls > 0) {
+      throw new Error(`LuaSkills engine ${this.#engineId} has active calls and cannot close reentrantly`);
+    }
+    this.#closing = true;
+    try {
+      const result = this.ffi.callJson<RuntimeAckResult>("luaskills_ffi_engine_free_json", {
+        engine_id: this.#engineId,
+      });
+      this.#closed = true;
+      return result;
+    } finally {
+      this.#closing = false;
+    }
+  }
+
+  /**
+   * Call one engine-bound JSON FFI function while reserving the native handle.
+   * 保留原生句柄期间调用一个绑定 engine 的 JSON FFI 函数。
+   */
+  #callJson<T>(functionName: string, payload: JsonValue | Record<string, unknown>): T {
+    this.#beginCall();
+    try {
+      return this.ffi.callJson<T>(functionName, payload);
+    } finally {
+      this.#endCall();
+    }
+  }
+
+  /**
+   * Reserve the native engine handle for one synchronous FFI dispatch.
+   * 为单次同步 FFI 分发保留原生引擎句柄。
+   */
+  #beginCall(): void {
+    this.#assertOpen();
+    if (this.#closing) {
+      throw new Error(`LuaSkills engine ${this.#engineId} is closing`);
+    }
+    this.#activeCalls += 1;
+  }
+
+  /**
+   * Release one active synchronous FFI dispatch reservation.
+   * 释放一次活跃同步 FFI 分发占用。
+   */
+  #endCall(): void {
+    this.#activeCalls -= 1;
   }
 
   /**
    * Assert that the client still owns a live native engine handle.
    * 断言当前客户端仍持有存活的原生引擎句柄。
    */
-  private assertOpen(): void {
-    if (this.closed) {
-      throw new Error(`LuaSkills engine ${this.engineId} is already closed`);
+  #assertOpen(): void {
+    if (this.#closed) {
+      throw new Error(`LuaSkills engine ${this.#engineId} is already closed`);
     }
   }
 }
@@ -376,10 +560,14 @@ export class SkillConfigClient {
    * 列出扁平化配置记录，并可选限制到单个 skill id。
    */
   list(skillId?: string): SkillConfigEntry[] {
-    return this.client.ffi.callJson<SkillConfigEntry[]>("luaskills_ffi_skill_config_list_json", {
-      engine_id: this.client.engineId,
-      skill_id: skillId ?? null,
-    });
+    return this.client.callJson<SkillConfigEntry[]>(
+      "luaskills_ffi_skill_config_list_json",
+      {
+        engine_id: this.client.engineId,
+        skill_id: skillId ?? null,
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 
   /**
@@ -387,11 +575,15 @@ export class SkillConfigClient {
    * 按 skill id 与 key 获取单个配置值。
    */
   get(skillId: string, key: string): SkillConfigGetResult {
-    return this.client.ffi.callJson<SkillConfigGetResult>("luaskills_ffi_skill_config_get_json", {
-      engine_id: this.client.engineId,
-      skill_id: skillId,
-      key,
-    });
+    return this.client.callJson<SkillConfigGetResult>(
+      "luaskills_ffi_skill_config_get_json",
+      {
+        engine_id: this.client.engineId,
+        skill_id: skillId,
+        key,
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 
   /**
@@ -399,12 +591,16 @@ export class SkillConfigClient {
    * 按 skill id 与 key 设置单个配置值。
    */
   set(skillId: string, key: string, value: string): SkillConfigMutationResult {
-    return this.client.ffi.callJson<SkillConfigMutationResult>("luaskills_ffi_skill_config_set_json", {
-      engine_id: this.client.engineId,
-      skill_id: skillId,
-      key,
-      value,
-    });
+    return this.client.callJson<SkillConfigMutationResult>(
+      "luaskills_ffi_skill_config_set_json",
+      {
+        engine_id: this.client.engineId,
+        skill_id: skillId,
+        key,
+        value,
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 
   /**
@@ -412,11 +608,15 @@ export class SkillConfigClient {
    * 按 skill id 与 key 删除单个配置值。
    */
   delete(skillId: string, key: string): SkillConfigMutationResult {
-    return this.client.ffi.callJson<SkillConfigMutationResult>("luaskills_ffi_skill_config_delete_json", {
-      engine_id: this.client.engineId,
-      skill_id: skillId,
-      key,
-    });
+    return this.client.callJson<SkillConfigMutationResult>(
+      "luaskills_ffi_skill_config_delete_json",
+      {
+        engine_id: this.client.engineId,
+        skill_id: skillId,
+        key,
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 }
 
@@ -440,13 +640,17 @@ export class SkillManagementClient {
    * 通过正式 root 链生命周期状态停用单个 skill。
    */
   disable(skillRoots: RuntimeSkillRoot[], skillId: string, reason?: string | null): RuntimeAckResult {
-    return this.client.ffi.callJson<RuntimeAckResult>(this.functionName("disable_skill"), {
-      engine_id: this.client.engineId,
-      skill_roots: skillRoots,
-      skill_id: skillId,
-      reason: reason ?? null,
-      ...this.authorityPayload(),
-    });
+    return this.client.callJson<RuntimeAckResult>(
+      this.#functionName("disable_skill"),
+      {
+        engine_id: this.client.engineId,
+        skill_roots: skillRoots,
+        skill_id: skillId,
+        reason: reason ?? null,
+        ...this.#authorityPayload(),
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 
   /**
@@ -454,12 +658,16 @@ export class SkillManagementClient {
    * 通过正式 root 链生命周期状态启用单个 skill。
    */
   enable(skillRoots: RuntimeSkillRoot[], skillId: string): RuntimeAckResult {
-    return this.client.ffi.callJson<RuntimeAckResult>(this.functionName("enable_skill"), {
-      engine_id: this.client.engineId,
-      skill_roots: skillRoots,
-      skill_id: skillId,
-      ...this.authorityPayload(),
-    });
+    return this.client.callJson<RuntimeAckResult>(
+      this.#functionName("enable_skill"),
+      {
+        engine_id: this.client.engineId,
+        skill_roots: skillRoots,
+        skill_id: skillId,
+        ...this.#authorityPayload(),
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 
   /**
@@ -472,14 +680,18 @@ export class SkillManagementClient {
     options: SkillUninstallOptions = {},
     lifecycleOptions: SkillLifecycleOptions = {},
   ): SkillUninstallResult {
-    return this.client.ffi.callJson<SkillUninstallResult>(this.functionName("uninstall_skill"), {
-      engine_id: this.client.engineId,
-      skill_roots: skillRoots,
-      skill_id: skillId,
-      options,
-      target_root: lifecycleOptions.targetRoot ?? null,
-      ...this.authorityPayload(lifecycleOptions.authority),
-    });
+    return this.client.callJson<SkillUninstallResult>(
+      this.#functionName("uninstall_skill"),
+      {
+        engine_id: this.client.engineId,
+        skill_roots: skillRoots,
+        skill_id: skillId,
+        options,
+        target_root: lifecycleOptions.targetRoot ?? null,
+        ...this.#authorityPayload(lifecycleOptions.authority),
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 
   /**
@@ -491,13 +703,18 @@ export class SkillManagementClient {
     request: SkillInstallRequest,
     lifecycleOptions: SkillLifecycleOptions = {},
   ): SkillApplyResult {
-    return this.client.ffi.callJson<SkillApplyResult>(this.functionName("install_skill"), {
-      engine_id: this.client.engineId,
-      skill_roots: skillRoots,
-      request,
-      target_root: lifecycleOptions.targetRoot ?? null,
-      ...this.authorityPayload(lifecycleOptions.authority),
-    });
+    const validatedRequest = validateSkillInstallRequest("install_skill", request);
+    return this.client.callJson<SkillApplyResult>(
+      this.#functionName("install_skill"),
+      {
+        engine_id: this.client.engineId,
+        skill_roots: skillRoots,
+        request: validatedRequest,
+        target_root: lifecycleOptions.targetRoot ?? null,
+        ...this.#authorityPayload(lifecycleOptions.authority),
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 
   /**
@@ -509,20 +726,26 @@ export class SkillManagementClient {
     request: SkillInstallRequest,
     lifecycleOptions: SkillLifecycleOptions = {},
   ): SkillApplyResult {
-    return this.client.ffi.callJson<SkillApplyResult>(this.functionName("update_skill"), {
-      engine_id: this.client.engineId,
-      skill_roots: skillRoots,
-      request,
-      target_root: lifecycleOptions.targetRoot ?? null,
-      ...this.authorityPayload(lifecycleOptions.authority),
-    });
+    const validatedRequest = validateSkillInstallRequest("update_skill", request);
+    return this.client.callJson<SkillApplyResult>(
+      this.#functionName("update_skill"),
+      {
+        engine_id: this.client.engineId,
+        skill_roots: skillRoots,
+        request: validatedRequest,
+        target_root: lifecycleOptions.targetRoot ?? null,
+        ...this.#authorityPayload(lifecycleOptions.authority),
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 
   /**
    * Build the concrete JSON FFI function name for the current namespace.
    * 为当前命名空间构造具体 JSON FFI 函数名称。
    */
-  protected functionName(baseName: string): string {
+  #functionName(actionName: SkillLifecycleAction): string {
+    const baseName = skillLifecycleActionValue(actionName);
     return `luaskills_ffi_${this.systemPlane ? "system_" : ""}${baseName}_json`;
   }
 
@@ -530,7 +753,7 @@ export class SkillManagementClient {
    * Build the authority payload required by system JSON FFI entrypoints.
    * 构造 system JSON FFI 入口要求的权限载荷。
    */
-  protected authorityPayload(overrideAuthority?: Authority | `${Authority}`): { authority?: Authority | `${Authority}` } {
+  #authorityPayload(overrideAuthority?: Authority | `${Authority}`): { authority?: Authority | `${Authority}` } {
     return this.systemPlane ? { authority: overrideAuthority ?? this.authority } : {};
   }
 }
@@ -549,12 +772,42 @@ export class SystemSkillManagementClient extends SkillManagementClient {
   }
 
   /**
+   * Install one host-approved private URL-manifest skill through the system-private JSON FFI endpoint.
+   * 通过 system 私有 JSON FFI 入口安装单个宿主已批准的私有 URL manifest 技能。
+   */
+  installPrivateUrlManifest(
+    skillRoots: RuntimeSkillRoot[],
+    skillId: string,
+    manifestUrl: string,
+    options: PrivateUrlManifestSkillOptions = {},
+  ): SkillApplyResult {
+    return this.#privateUrlManifest("install", skillRoots, skillId, manifestUrl, options);
+  }
+
+  /**
+   * Update one host-approved private URL-manifest skill through the system-private JSON FFI endpoint.
+   * 通过 system 私有 JSON FFI 入口更新单个宿主已批准的私有 URL manifest 技能。
+   */
+  updatePrivateUrlManifest(
+    skillRoots: RuntimeSkillRoot[],
+    skillId: string,
+    manifestUrl: string,
+    options: PrivateUrlManifestSkillOptions = {},
+  ): SkillApplyResult {
+    return this.#privateUrlManifest("update", skillRoots, skillId, manifestUrl, options);
+  }
+
+  /**
    * Call one authority-bound JSON FFI function and require an object-shaped result payload.
    * 调用一个绑定 authority 的 JSON FFI 函数并要求返回对象形状结果载荷。
    */
-  call(functionName: string, payload: JsonMap = {}): JsonMap {
+  #callObject(functionName: string, payload: JsonMap = {}): JsonMap {
     return requireJsonMap(
-      this.client.ffi.callJson<JsonValue>(functionName, this.withEngineAuthority(payload)),
+      this.client.callJson<JsonValue>(
+        functionName,
+        this.#withEngineAuthority(payload),
+        LUA_SKILLS_CLIENT_CALL_TOKEN,
+      ),
       `${functionName} object result`,
     );
   }
@@ -563,8 +816,12 @@ export class SystemSkillManagementClient extends SkillManagementClient {
    * Call one authority-bound JSON FFI function and return any decoded JSON result shape.
    * 调用一个绑定 authority 的 JSON FFI 函数并返回任意已解码 JSON 结果形状。
    */
-  callValue<T = JsonValue>(functionName: string, payload: JsonMap = {}): T {
-    return this.client.ffi.callJson<T>(functionName, this.withEngineAuthority(payload));
+  #callValue<T = JsonValue>(functionName: string, payload: JsonMap = {}): T {
+    return this.client.callJson<T>(
+      functionName,
+      this.#withEngineAuthority(payload),
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 
   /**
@@ -580,7 +837,7 @@ export class SystemSkillManagementClient extends SkillManagementClient {
    * 列出当前绑定 authority 可见的运行时入口。
    */
   listEntries(): RuntimeEntryDescriptor[] {
-    const result = this.callValue<RuntimeEntryDescriptor[]>("luaskills_ffi_list_entries_json");
+    const result = this.#callValue<RuntimeEntryDescriptor[]>("luaskills_ffi_list_entries_json");
     if (!Array.isArray(result)) {
       throw new Error("luaskills_ffi_list_entries_json did not return one array result");
     }
@@ -592,7 +849,7 @@ export class SystemSkillManagementClient extends SkillManagementClient {
    * 列出当前绑定 authority 可见的技能帮助树。
    */
   listSkillHelp(): RuntimeSkillHelpDescriptor[] {
-    const result = this.callValue<RuntimeSkillHelpDescriptor[]>("luaskills_ffi_list_skill_help_json");
+    const result = this.#callValue<RuntimeSkillHelpDescriptor[]>("luaskills_ffi_list_skill_help_json");
     if (!Array.isArray(result)) {
       throw new Error("luaskills_ffi_list_skill_help_json did not return one array result");
     }
@@ -615,7 +872,7 @@ export class SystemSkillManagementClient extends SkillManagementClient {
     if (requestContext !== undefined) {
       payload.request_context = requestContext;
     }
-    const result = this.callValue<RuntimeHelpDetail | null>("luaskills_ffi_render_skill_help_detail_json", payload);
+    const result = this.#callValue<RuntimeHelpDetail | null>("luaskills_ffi_render_skill_help_detail_json", payload);
     if (result === null) {
       return null;
     }
@@ -627,7 +884,7 @@ export class SystemSkillManagementClient extends SkillManagementClient {
    * 查询当前绑定 authority 可见的 prompt 参数补全项。
    */
   promptArgumentCompletions(promptName: string, argumentName: string): string[] | null {
-    const result = this.callValue<string[] | null>("luaskills_ffi_prompt_argument_completions_json", {
+    const result = this.#callValue<string[] | null>("luaskills_ffi_prompt_argument_completions_json", {
       prompt_name: promptName,
       argument_name: argumentName,
     });
@@ -645,7 +902,7 @@ export class SystemSkillManagementClient extends SkillManagementClient {
    * 返回某个 canonical 工具名是否解析为一个可见技能入口。
    */
   isSkill(toolName: string): boolean {
-    const result = this.call("luaskills_ffi_is_skill_json", {
+    const result = this.#callObject("luaskills_ffi_is_skill_json", {
       tool_name: toolName,
     });
     if (typeof result.value !== "boolean") {
@@ -659,7 +916,7 @@ export class SystemSkillManagementClient extends SkillManagementClient {
    * 在可见时解析某个 canonical 工具名所属的技能标识。
    */
   skillNameForTool(toolName: string): string | null {
-    const result = this.call("luaskills_ffi_skill_name_for_tool_json", {
+    const result = this.#callObject("luaskills_ffi_skill_name_for_tool_json", {
       tool_name: toolName,
     });
     if (result.skill_id === null || result.skill_id === undefined) {
@@ -675,12 +932,38 @@ export class SystemSkillManagementClient extends SkillManagementClient {
    * Attach the bound engine id and authority to one outgoing payload.
    * 为单个发出的载荷附加已绑定的引擎标识与 authority。
    */
-  private withEngineAuthority(payload: JsonMap): JsonMap {
+  #withEngineAuthority(payload: JsonMap): JsonMap {
     return {
       ...payload,
       engine_id: this.client.engineId,
       authority: this.authority,
     };
+  }
+
+  /**
+   * Execute one host-private URL-manifest install or update operation.
+   * 执行单个宿主私有 URL manifest 安装或更新操作。
+   */
+  #privateUrlManifest(
+    actionName: "install" | "update",
+    skillRoots: RuntimeSkillRoot[],
+    skillId: string,
+    manifestUrl: string,
+    options: PrivateUrlManifestSkillOptions,
+  ): SkillApplyResult {
+    validatePrivateUrlManifestInput(skillId, manifestUrl);
+    return this.client.callJson<SkillApplyResult>(
+      `luaskills_ffi_system_private_${actionName}_skill_from_url_manifest_json`,
+      {
+        engine_id: this.client.engineId,
+        skill_roots: skillRoots,
+        skill_id: skillId,
+        manifest_url: manifestUrl,
+        target_root: options.targetRoot ?? null,
+        authority: Authority.System,
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
   }
 }
 
@@ -724,7 +1007,7 @@ export class RuntimeLeaseClient {
    * Dispatch one raw runtime-lease JSON request without applying success checks.
    * 分发单个原始运行时租约 JSON 请求而不附加成功校验。
    */
-  callRaw(action: string, payload: JsonMap): JsonMap {
+  callRaw(action: RuntimeLeaseAction, payload: JsonMap): JsonMap {
     const requestPayload: JsonMap = {
       ...payload,
       engine_id: this.client.engineId,
@@ -733,7 +1016,11 @@ export class RuntimeLeaseClient {
       requestPayload.authority = this.authority;
     }
     return requireJsonMap(
-      this.client.ffi.callJson<JsonValue>(this.runtimeLeaseFunctionName(action), requestPayload),
+      this.client.callJson<JsonValue>(
+        this.#runtimeLeaseFunctionName(action),
+        requestPayload,
+        LUA_SKILLS_CLIENT_CALL_TOKEN,
+      ),
       `runtime lease ${action} result`,
     );
   }
@@ -748,6 +1035,12 @@ export class RuntimeLeaseClient {
     replace = false,
     options: RuntimeLeaseCreateOptions = {},
   ): JsonMap {
+    if (this.authority !== undefined && (options.lua_roots !== undefined || options.c_roots !== undefined)) {
+      throw new Error("system runtime lease create does not accept lua_roots or c_roots");
+    }
+    if (this.authority !== undefined) {
+      requireSystemRuntimePackage(options.system_package);
+    }
     const createPayload: JsonMap = {
       sid,
       replace,
@@ -769,6 +1062,14 @@ export class RuntimeLeaseClient {
     }
     if (options.mounts !== undefined) {
       createPayload.mounts = options.mounts;
+    }
+    if (this.authority !== undefined) {
+      const systemPackage = options.system_package!;
+      createPayload.system_package = {
+        id: systemPackage.id,
+        root: systemPackage.root,
+        dependencies_file: systemPackage.dependencies_file,
+      };
     }
     return requireRuntimeLeaseOK(
       this.callRaw("create", createPayload),
@@ -906,12 +1207,13 @@ export class RuntimeLeaseClient {
    * Resolve the concrete runtime-lease JSON FFI entrypoint name for one logical action.
    * 为单个逻辑动作解析具体的运行时租约 JSON FFI 入口名称。
    */
-  private runtimeLeaseFunctionName(action: string): string {
-    const publicName = `luaskills_ffi_runtime_lease_${action}_json`;
+  #runtimeLeaseFunctionName(action: RuntimeLeaseAction): string {
+    const actionValue = runtimeLeaseActionValue(action);
+    const publicName = `luaskills_ffi_runtime_lease_${actionValue}_json`;
     if (this.authority === undefined) {
       return publicName;
     }
-    return `luaskills_ffi_system_runtime_lease_${action}_json`;
+    return `luaskills_ffi_system_runtime_lease_${actionValue}_json`;
   }
 }
 
@@ -1008,6 +1310,25 @@ export function requireRuntimeLeaseOK(payload: JsonMap, action: string): JsonMap
 }
 
 /**
+ * Validate the exact trusted System Plugin package descriptor required by Rust.
+ * 校验 Rust 强制要求的精确信任 System Plugin 包描述符。
+ */
+function requireSystemRuntimePackage(value: RuntimeLeaseCreateOptions["system_package"]): void {
+  if (!value) {
+    throw new Error("system runtime lease create requires system_package");
+  }
+  const keys = Object.keys(value).sort();
+  if (keys.join(",") !== "dependencies_file,id,root") {
+    throw new Error("system_package must contain exactly id, root, and dependencies_file");
+  }
+  for (const [fieldName, fieldValue] of Object.entries(value)) {
+    if (typeof fieldValue !== "string" || fieldValue.length === 0) {
+      throw new Error(`system_package ${fieldName} must be one non-empty string`);
+    }
+  }
+}
+
+/**
  * Read one required runtime-lease string field from one payload object.
  * 从一份载荷对象中读取一个必填的运行时租约字符串字段。
  */
@@ -1040,6 +1361,182 @@ function requireJsonMap(value: JsonValue, context: string): JsonMap {
     return value as JsonMap;
   }
   throw new Error(`${context} must be one JSON object`);
+}
+
+/**
+ * Return a protocol-shaped install or update request after rejecting malformed SDK input.
+ * 拒绝格式错误的 SDK 输入后返回符合协议形状的安装或更新请求。
+ */
+function validateSkillInstallRequest(actionName: SkillLifecycleAction, request: SkillInstallRequest): SkillInstallRequest {
+  if (request === null || typeof request !== "object" || Array.isArray(request)) {
+    throw new Error("skill install request must be one JSON object");
+  }
+  const record = request as unknown as Record<string, unknown>;
+  const unknownKeys = Object.keys(record).filter((key) => !SKILL_INSTALL_REQUEST_KEYS.has(key)).sort();
+  if (unknownKeys.length > 0) {
+    throw new Error(`skill install request contains unsupported keys: ${unknownKeys.join(", ")}`);
+  }
+  const sourceType = requireSkillInstallSourceType(record.source_type);
+  const skillId = optionalExactNonBlankString(record.skill_id, "skill_id");
+  const source = optionalExactNonBlankString(record.source, "source");
+  if (source !== null && URL_SKILL_INSTALL_SOURCE_TYPES.has(sourceType)) {
+    validateHttpUrl(source, "source");
+  }
+  validateSkillInstallRequestPresence(actionName, sourceType, skillId, source);
+  const validated: SkillInstallRequest = { source_type: sourceType };
+  if (skillId !== null) {
+    validated.skill_id = skillId;
+  }
+  if (source !== null) {
+    validated.source = source;
+  }
+  return validated;
+}
+
+/**
+ * Return one supported Rust SkillInstallSourceType value from an SDK request field.
+ * 从 SDK 请求字段返回一个受支持的 Rust SkillInstallSourceType 值。
+ */
+function requireSkillInstallSourceType(value: unknown): SkillInstallSourceType {
+  if (
+    value === SkillInstallSourceType.Github ||
+    value === SkillInstallSourceType.OfficialHub ||
+    value === SkillInstallSourceType.Url ||
+    value === SkillInstallSourceType.PrivateUrlManifest
+  ) {
+    return value;
+  }
+  throw new Error("skill install request source_type must be one of github, official_hub, url, private_url_manifest");
+}
+
+/**
+ * Enforce the identifiers and source locators consumed by the native resolver for one lifecycle action.
+ * 强制校验原生解析器在单个生命周期动作中会消费的标识与来源定位值。
+ */
+function validateSkillInstallRequestPresence(
+  actionName: SkillLifecycleAction,
+  sourceType: SkillInstallSourceType,
+  skillId: string | null,
+  source: string | null,
+): void {
+  if (actionName === "install_skill") {
+    validateSkillInstallPresence(sourceType, skillId, source);
+  } else if (actionName === "update_skill") {
+    validateSkillUpdatePresence(sourceType, skillId, source);
+  }
+}
+
+/**
+ * Enforce required fields for one install request before FFI dispatch.
+ * 在 FFI 分发前强制校验单个安装请求的必填字段。
+ */
+function validateSkillInstallPresence(
+  sourceType: SkillInstallSourceType,
+  skillId: string | null,
+  source: string | null,
+): void {
+  if (sourceType === SkillInstallSourceType.Github && source === null) {
+    throw new Error("github install request requires source");
+  }
+  if (sourceType === SkillInstallSourceType.OfficialHub && skillId === null && source === null) {
+    throw new Error("official_hub install request requires skill_id or source");
+  }
+  if (sourceType === SkillInstallSourceType.Url && (skillId === null || source === null)) {
+    throw new Error("url install request requires skill_id and source");
+  }
+  if (sourceType === SkillInstallSourceType.PrivateUrlManifest && (skillId === null || source === null)) {
+    throw new Error("private_url_manifest install request requires skill_id and source");
+  }
+}
+
+/**
+ * Enforce required fields for one update request before FFI dispatch.
+ * 在 FFI 分发前强制校验单个更新请求的必填字段。
+ */
+function validateSkillUpdatePresence(sourceType: SkillInstallSourceType, skillId: string | null, source: string | null): void {
+  if (sourceType === SkillInstallSourceType.Github || sourceType === SkillInstallSourceType.OfficialHub) {
+    if (skillId === null && source === null) {
+      throw new Error(`${sourceType} update request requires skill_id or source`);
+    }
+  } else if (skillId === null) {
+    throw new Error(`${sourceType} update request requires skill_id`);
+  }
+}
+
+/**
+ * Validate the dedicated private URL-manifest shortcut payload before FFI dispatch.
+ * 在 FFI 分发前校验专用私有 URL manifest 快捷入口载荷。
+ */
+function validatePrivateUrlManifestInput(skillId: string, manifestUrl: string): void {
+  requireExactNonBlankString(skillId, "skill_id");
+  validateHttpUrl(manifestUrl, "manifest_url");
+}
+
+/**
+ * Return an optional exact JSON string while rejecting empty or implicitly trimmed values.
+ * 返回可选的精确 JSON 字符串，同时拒绝空值或需要隐式裁剪的值。
+ */
+function optionalExactNonBlankString(value: unknown, fieldName: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return requireExactNonBlankString(value, fieldName);
+  }
+  throw new Error(`skill install request ${fieldName} must be a string`);
+}
+
+/**
+ * Return one non-empty string that does not require SDK-side whitespace normalization.
+ * 返回一个不需要 SDK 侧空白规范化的非空字符串。
+ */
+function requireExactNonBlankString(value: string, fieldName: string): string {
+  if (value.length === 0 || value.trim() !== value) {
+    throw new Error(`skill install request ${fieldName} must be a non-empty string without surrounding whitespace`);
+  }
+  return value;
+}
+
+/**
+ * Reject non-HTTP, relative, or credential-bearing URLs before native download resolution.
+ * 在原生下载解析前拒绝非 HTTP、相对路径或携带账号信息的 URL。
+ */
+function validateHttpUrl(value: string, fieldName: string): void {
+  requireExactNonBlankString(value, fieldName);
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`skill install request ${fieldName} must be an absolute HTTP or HTTPS URL`);
+  }
+  if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.hostname.length === 0) {
+    throw new Error(`skill install request ${fieldName} must be an absolute HTTP or HTTPS URL`);
+  }
+  if (parsed.username.length > 0 || parsed.password.length > 0) {
+    throw new Error(`skill install request ${fieldName} must not include credentials`);
+  }
+}
+
+/**
+ * Return one validated skill lifecycle action string for JSON FFI function names.
+ * 返回一个用于 JSON FFI 函数名的已验证 skill 生命周期动作字符串。
+ */
+function skillLifecycleActionValue(action: string): SkillLifecycleAction {
+  if (SKILL_LIFECYCLE_ACTIONS.has(action as SkillLifecycleAction)) {
+    return action as SkillLifecycleAction;
+  }
+  throw new Error(`unsupported skill lifecycle action: ${action}`);
+}
+
+/**
+ * Return one validated runtime-lease action string for JSON FFI function names.
+ * 返回一个用于 JSON FFI 函数名的已验证运行时租约动作字符串。
+ */
+function runtimeLeaseActionValue(action: string): RuntimeLeaseAction {
+  if (RUNTIME_LEASE_ACTIONS.has(action as RuntimeLeaseAction)) {
+    return action as RuntimeLeaseAction;
+  }
+  throw new Error(`unsupported runtime lease action: ${action}`);
 }
 
 /**

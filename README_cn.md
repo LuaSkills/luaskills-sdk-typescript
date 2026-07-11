@@ -25,6 +25,18 @@ Linux 与 macOS 会使用安装在 `runtimeRoot/libs` 下的 `.so` / `.dylib` �
 
 ## Runtime 资产
 
+npm 包还提供不依赖 Node.js CLI 的统一同步脚本，可直接拉取 LuaSkills FFI、Lua runtime packages 与 VLDB：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_assets.ps1 -Target all -Database vldb-controller -RuntimeRoot D:\runtime\luaskills
+```
+
+```bash
+RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all vldb-controller
+```
+
+目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.5.0`，并允许显式覆盖发布版本。
+
 `install-runtime` 会下载 GitHub Release 资产、校验 `.sha256` 旁路文件、解压原生文件与 Lua runtime 包，并写入：
 
 ```text
@@ -44,12 +56,18 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 - `luaskills-ffi-sdk-{platform}.tar.gz`：默认安装；提供公共 FFI 动态库、头文件与 FFI 授权材料。
 - `lua-deps-{platform}.tar.gz`：SDK 不默认安装；它是 CI、源码构建或高级原生模块重建使用的构建期依赖包。
 
+受管 Python 与 Node.js 子运行时是可选项。当 Lua skill 需要 `vulcan.runtime.python.*` 或 `vulcan.runtime.node.*` 时，使用 `--managed-runtimes all`；安装器会把 Python、`uv`、Node.js 与 `pnpm` 放入 `runtimeRoot/dependencies/runtimes/...`。
+
+受管子运行时支持 Windows x64、Linux x64/ARM64 与 macOS x64/ARM64。Windows ARM 会在任何下载或目标目录创建前被明确拒绝。npm 包还包含 `scripts/deps/fetch_managed_runtimes.ps1`、`scripts/deps/fetch_managed_runtimes.sh` 与 `scripts/debug-tools/managed_runtime_layout_check.py` 独立工具，用于准备和校验 debug 运行时根目录。
+
+当前受管依赖精确版本为 Python `3.12.7`、uv `0.11.17`、Node.js `22.11.0`、pnpm `9.15.0`。除非宿主有意安装其他受支持版本，否则包内 `dependencies.yaml` 必须声明相同的运行时与包管理器精确版本。
+
 默认情况下，SDK 会把 LuaSkills core 固定到自身对应版本，并从兼容的 `0.1` 协议线中自动解析最新已发布的 runtime packages patch 版本。
 
 ## 版本对齐
 
 - 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
-- 当前 SDK 默认指向 LuaSkills core 标签 `v0.4.6`。
+- 当前 SDK 默认指向 LuaSkills core 标签 `v0.5.0`。
 - runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
 - SDK 默认 host options 现在只传 `runtime_root`；LuaSkills 会自动推导 `bin`、`libs`、`lua_packages`、`resources`、`skills`、`temp`、`dependencies`、`state`、`databases`、`config` 与 `system_lua_lib`。
 - 宿主工具直接放在 `runtime_root/bin`，不再放到 `runtime_root/bin/tools`。
@@ -58,6 +76,7 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk install-runtime --database vldb-controller --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
+npx @luaskills/sdk install-runtime --database none --managed-runtimes all --runtime-root D:\runtime\luaskills
 ```
 
 下载前可用 `--dry-run` 检查准确的 release URL：
@@ -200,6 +219,7 @@ try {
   const session = leases.createHandle("demo-session", 600, true, {
     cwd: "D:/runtime/luaskills/system_lua_lib",
     mounts: { channel: "demo" },
+    system_package: { id: "debug-plugin", root: "D:/runtime/luaskills/system_lua_lib/debug-plugin", dependencies_file: "dependencies.json" },
   });
   const result = session.eval("counter = (counter or 0) + 1; return { counter = counter }");
   console.log(result.result);
@@ -219,7 +239,8 @@ try {
 - 当 `host_result.kind === "change_set"` 时，宿主应把 `payload` 按 `RuntimeChangeSetPayload` 解析。
 - canonical `change_set` 现在使用文件生命周期记录；`modify` 通过 hunk 级 `before + delete[] + insert[] + after` 表达具体修改。
 - `create` 与 `delete` 文件记录直接携带整文件 `content`，`rename` 记录携带 `old_path` 与 `new_path`。
-- `runtimeLeases().create()` 与 `createHandle()` 现在接受 `cwd`、`workspace_root`、`lua_roots`、`c_roots`、`mounts` 等宿主路径选项。
+- 普通租约接受 `cwd`、`workspace_root`、`lua_roots`、`c_roots`、`mounts`。System 租约强制要求 `system_package`，拒绝 `lua_roots/c_roots`，并从可信包清单推导根目录。
+- `pollManagedSessionEvents()`、`waitManagedSessionEvents()`、`setManagedSessionWakeCallback()` 暴露 0.5.0 事件接口。
 - 源码树示例现在会优先加载已安装发布包；拿不到时再回退到本地 `dist` 构建产物，因此仓库内烟测与独立 examples 包可以共用同一套脚本。
 
 ## JSON Provider Callback

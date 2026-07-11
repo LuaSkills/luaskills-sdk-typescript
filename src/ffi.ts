@@ -2,7 +2,7 @@ import koffi from "koffi";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { resolveLuaSkillsLibraryPathFromRuntime } from "./runtime-assets.js";
-import type { FfiDescribeResult, JsonValue, LuaSkillsSdkOptions } from "./types.js";
+import type { FfiDescribeResult, JsonValue, LuaSkillsSdkOptions, SkillInstallSourceType } from "./types.js";
 
 /**
  * Owned buffer shape returned by the LuaSkills JSON FFI.
@@ -84,6 +84,9 @@ type JsonCallback<Request extends JsonValue = JsonValue> = (request: Request) =>
  */
 export type JsonProviderCallback = JsonCallback;
 
+/** Host callback scheduled when managed-session events become readable. / 受管会话事件变为可读时调度的宿主回调。 */
+export type ManagedSessionWakeCallback = (engineId: number) => void;
+
 /**
  * Host-tool bridge action names emitted by `vulcan.host.*`.
  * `vulcan.host.*` 发出的宿主工具桥接动作名称。
@@ -122,6 +125,106 @@ export type HostToolJsonRequest = {
  * 由 SDK 调用方实现的宿主工具桥接 JSON callback。
  */
 export type HostToolJsonCallback = JsonCallback<HostToolJsonRequest>;
+
+/**
+ * Skill operation progress plane names emitted by Rust progress events.
+ * Rust 进度事件发出的 skill 操作平面名称。
+ */
+export type SkillOperationProgressPlane = "Skills" | "System";
+
+/**
+ * Skill operation progress action names emitted by Rust progress events.
+ * Rust 进度事件发出的 skill 操作动作名称。
+ */
+export type SkillOperationProgressAction = "Install" | "Update" | "Reload" | "Uninstall" | "Enable" | "Disable";
+
+/**
+ * Skill lifecycle progress event delivered to the SDK callback.
+ * 传递给 SDK callback 的 skill 生命周期进度事件。
+ */
+export interface SkillOperationProgressEvent {
+  /**
+   * Future-compatible JSON fields emitted by the native bridge.
+   * 原生桥未来可能发出的当前未知 JSON 字段。
+   */
+  [key: string]: JsonValue | undefined;
+  /**
+   * Stable operation id shared by all events from one lifecycle operation.
+   * 同一个生命周期操作全部事件共享的稳定操作标识。
+   */
+  operation_id: string;
+  /**
+   * Monotonic sequence number inside the current operation.
+   * 当前操作内的单调递增序号。
+   */
+  sequence: number;
+  /**
+   * Operation plane that owns the lifecycle operation.
+   * 拥有该生命周期操作的操作平面。
+   */
+  plane: SkillOperationProgressPlane;
+  /**
+   * Lifecycle action represented by the event.
+   * 该事件表示的生命周期动作。
+   */
+  action: SkillOperationProgressAction;
+  /**
+   * Machine-readable phase name.
+   * 机器可读的阶段名称。
+   */
+  phase: string;
+  /**
+   * Machine-readable phase status.
+   * 机器可读的阶段状态。
+   */
+  status: string;
+  /**
+   * Optional target skill id.
+   * 可选目标 skill 标识。
+   */
+  skill_id?: string | null;
+  /**
+   * Optional target root name.
+   * 可选目标 root 名称。
+   */
+  root_name?: string | null;
+  /**
+   * Optional source type involved in the current phase.
+   * 当前阶段涉及的可选来源类型。
+   */
+  source_type?: SkillInstallSourceType | `${SkillInstallSourceType}` | null;
+  /**
+   * Optional source locator involved in the current phase.
+   * 当前阶段涉及的可选来源定位值。
+   */
+  source_locator?: string | null;
+  /**
+   * Optional completed byte count for download phases.
+   * 下载阶段的可选已完成字节数。
+   */
+  bytes_done?: number | null;
+  /**
+   * Optional total byte count for download phases.
+   * 下载阶段的可选总字节数。
+   */
+  bytes_total?: number | null;
+  /**
+   * Optional determinate progress percentage.
+   * 可选的确定性进度百分比。
+   */
+  percent?: number | null;
+  /**
+   * Optional human-readable progress message.
+   * 可选的人类可读进度消息。
+   */
+  message?: string | null;
+}
+
+/**
+ * Host-side skill operation progress callback implemented by SDK callers.
+ * 由 SDK 调用方实现的宿主侧 skill 操作进度 callback。
+ */
+export type SkillOperationProgressCallback = JsonCallback<SkillOperationProgressEvent>;
 
 /**
  * Standard model capability names exposed by vulcan.models.*.
@@ -408,7 +511,7 @@ type JsonProviderSetterFunction = (
  * Native JSON callback slot names managed by this bridge.
  * 当前桥接管理的原生 JSON callback 槽位名称。
  */
-type JsonCallbackKind = "sqlite" | "lancedb" | "host-tool" | "model-embed" | "model-llm";
+type JsonCallbackKind = "sqlite" | "lancedb" | "host-tool" | "skill-operation-progress" | "model-embed" | "model-llm";
 
 /**
  * Module-level JSON callback slot state matching native process-wide slots.
@@ -462,6 +565,11 @@ const BORROWED_BUFFER_TYPE = koffi.struct("FfiBorrowedBuffer", {
  */
 const JSON_PROVIDER_CALLBACK_TYPE = koffi.proto(
   "int32_t FfiJsonProviderCallback(FfiBorrowedBuffer request_json, void *user_data, FfiOwnedBuffer *response_out, FfiOwnedBuffer *error_out)",
+);
+
+/** Native callback descriptor for engine-level managed-session wake notifications. / 引擎级受管会话唤醒通知的原生回调描述符。 */
+const MANAGED_SESSION_WAKE_CALLBACK_TYPE = koffi.proto(
+  "int32_t FfiManagedSessionWakeCallback(uint64_t engine_id, void *user_data, FfiOwnedBuffer *error_out)",
 );
 
 /**
@@ -520,6 +628,9 @@ export class LuaSkillsJsonFfi {
    * JSON provider callback 的 koffi 回调类型描述。
    */
   private readonly jsonProviderCallbackType: koffi.IKoffiCType;
+
+  /** Live registered wake callbacks keyed by engine id. / 按引擎标识保存的存活唤醒回调。 */
+  private readonly managedSessionWakeCallbacks = new Map<number, koffi.IKoffiRegisteredCallback>();
 
   /**
    * Native buffer-free function exported by LuaSkills.
@@ -602,6 +713,49 @@ export class LuaSkillsJsonFfi {
   }
 
   /**
+   * Register, replace, or clear one engine-level managed-session wake callback.
+   * 注册、替换或清除一个引擎级受管会话唤醒回调。
+   */
+  setManagedSessionWakeCallback(engineId: number, callback: ManagedSessionWakeCallback | null): void {
+    const functionName = "luaskills_ffi_set_managed_session_wake_callback";
+    const previous = this.managedSessionWakeCallbacks.get(engineId);
+    let registered: koffi.IKoffiRegisteredCallback | null = null;
+    if (callback) {
+      registered = koffi.register(
+        (callbackEngineId: number, _userData: unknown, errorOut: unknown): number => {
+          try {
+            callback(callbackEngineId);
+            return 0;
+          } catch (error) {
+            try {
+              this.cloneOwnedBuffer(Buffer.from(errorMessage(error), "utf8"), errorOut);
+            } catch {
+              // Callback boundaries must never throw into C.
+              // callback 边界绝不能向 C 层抛出异常。
+            }
+            return 1;
+          }
+        },
+        koffi.pointer(MANAGED_SESSION_WAKE_CALLBACK_TYPE),
+      );
+    }
+    const setter = this.library.func(
+      `int32_t ${functionName}(uint64_t engine_id, FfiManagedSessionWakeCallback *callback, void *user_data, _Out_ FfiOwnedBuffer *error_out)`,
+    ) as (engineId: number, callback: koffi.IKoffiRegisteredCallback | null, userData: null, errorOut: FfiOwnedBuffer) => number;
+    const errorOut = {} as FfiOwnedBuffer;
+    const status = setter(engineId, registered, null, errorOut);
+    if (status !== 0) {
+      if (registered) koffi.unregister(registered);
+      const message = this.readOwnedBuffer(errorOut) || "Unknown managed-session wake callback registration error";
+      if (errorOut.ptr) this.freeBuffer(errorOut);
+      throw new LuaSkillsError(functionName, message);
+    }
+    if (previous) koffi.unregister(previous);
+    if (registered) this.managedSessionWakeCallbacks.set(engineId, registered);
+    else this.managedSessionWakeCallbacks.delete(engineId);
+  }
+
+  /**
    * Register or clear the SQLite JSON provider callback.
    * 注册或清理 SQLite JSON provider callback。
    */
@@ -633,6 +787,18 @@ export class LuaSkillsJsonFfi {
     this.setJsonProviderCallback(
       "host-tool",
       "luaskills_ffi_set_host_tool_json_callback",
+      callback,
+    );
+  }
+
+  /**
+   * Register or clear the skill operation progress JSON callback.
+   * 注册或清理 skill 操作进度 JSON callback。
+   */
+  setSkillOperationProgressJsonCallback(callback: SkillOperationProgressCallback | null): void {
+    this.setJsonProviderCallback(
+      "skill-operation-progress",
+      "luaskills_ffi_set_skill_operation_progress_json_callback",
       callback,
     );
   }
@@ -686,6 +852,14 @@ export class LuaSkillsJsonFfi {
   }
 
   /**
+   * Clear the skill operation progress JSON callback slot.
+   * 清理 skill 操作进度 JSON callback 槽位。
+   */
+  clearSkillOperationProgressJsonCallback(): void {
+    this.setSkillOperationProgressJsonCallback(null);
+  }
+
+  /**
    * Clear the model embedding JSON callback slot.
    * 清理模型 embedding JSON callback 槽位。
    */
@@ -702,13 +876,46 @@ export class LuaSkillsJsonFfi {
   }
 
   /**
+   * Clear every JSON callback slot currently owned by this FFI bridge.
+   * 清理当前 FFI 桥持有的全部 JSON callback 槽位。
+   */
+  clearJsonProviderCallbacks(): void {
+    this.clearSqliteProviderJsonCallback();
+    this.clearLanceDbProviderJsonCallback();
+    this.clearHostToolJsonCallback();
+    this.clearSkillOperationProgressJsonCallback();
+    this.clearModelEmbedJsonCallback();
+    this.clearModelLlmJsonCallback();
+  }
+
+  /**
    * Decode one owned FFI buffer into a typed JSON envelope and free it.
    * 将一个拥有型 FFI 缓冲解码为类型化 JSON 包络并释放它。
    */
   private decodeEnvelope<T>(functionName: string, output: FfiOwnedBuffer): T {
     const text = this.readOwnedBuffer(output);
     this.freeBuffer(output);
-    const envelope = JSON.parse(text) as FfiJsonEnvelope<T>;
+    return this.decodeEnvelopeText<T>(functionName, text);
+  }
+
+  /**
+   * Decode one JSON FFI envelope text into a typed result payload.
+   * 将单个 JSON FFI 包络文本解码为类型化结果载荷。
+   */
+  private decodeEnvelopeText<T>(functionName: string, text: string): T {
+    if (text.trim() === "") {
+      throw new LuaSkillsError(functionName, "empty JSON FFI response envelope");
+    }
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(text);
+    } catch (error) {
+      throw new LuaSkillsError(functionName, `invalid JSON FFI response envelope: ${errorMessage(error)}`);
+    }
+    if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) {
+      throw new LuaSkillsError(functionName, "JSON FFI response envelope must be one object");
+    }
+    const envelope = decoded as FfiJsonEnvelope<T>;
     if (!envelope.ok) {
       throw new LuaSkillsError(functionName, envelope.error ?? "Unknown LuaSkills FFI error");
     }

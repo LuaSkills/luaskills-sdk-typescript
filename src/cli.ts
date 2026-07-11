@@ -2,8 +2,8 @@
 import { join, resolve } from "node:path";
 import { LuaSkillsClient } from "./client.js";
 import { RuntimeRoots } from "./roots.js";
-import { buildRuntimeInstallManifest, installRuntimeAssets, normalizeDatabasePreset, RuntimeDatabasePreset, type RuntimeInstallOptions } from "./runtime-assets.js";
-import { Authority, SkillInstallSourceType, type JsonValue, type RuntimeSkillRoot } from "./types.js";
+import { buildRuntimeInstallManifest, installRuntimeAssets, normalizeDatabasePreset, normalizeManagedRuntimeTarget, RuntimeDatabasePreset, type RuntimeInstallOptions } from "./runtime-assets.js";
+import { Authority, SkillInstallSourceType, type JsonValue, type RuntimeSkillRoot, type SkillInstallRequest } from "./types.js";
 
 /**
  * Parsed command-line arguments.
@@ -87,6 +87,12 @@ function runtimeInstallOptionsFromArgs(parsed: ParsedArgs, runtimeRoot: string):
     vldbControllerRepo: stringFlag(parsed, "vldb-controller-repo"),
     vldbSqliteRepo: stringFlag(parsed, "vldb-sqlite-repo"),
     vldbLancedbRepo: stringFlag(parsed, "vldb-lancedb-repo"),
+    managedRuntimes: normalizeManagedRuntimeTarget(stringFlag(parsed, "managed-runtimes")),
+    managedPythonVersion: stringFlag(parsed, "managed-python-version"),
+    managedUvVersion: stringFlag(parsed, "managed-uv-version"),
+    managedNodeVersion: stringFlag(parsed, "managed-node-version"),
+    managedPnpmVersion: stringFlag(parsed, "managed-pnpm-version"),
+    forceManagedRuntimes: booleanFlag(parsed, "force-managed-runtimes"),
   };
 }
 
@@ -295,7 +301,7 @@ function replaceRootDir(roots: RuntimeSkillRoot[], label: string, value?: string
  * Build one install or update request from CLI flags.
  * 从 CLI 标志构造单个安装或更新请求。
  */
-function installRequestFromArgs(parsed: ParsedArgs): { skill_id?: string | null; source?: string | null; source_type?: SkillInstallSourceType | `${SkillInstallSourceType}` } {
+function installRequestFromArgs(parsed: ParsedArgs): SkillInstallRequest {
   const source = stringFlag(parsed, "source") ?? parsed.positionals[1] ?? null;
   const sourceType = (stringFlag(parsed, "source-type") as SkillInstallSourceType | undefined) ?? SkillInstallSourceType.Github;
   return {
@@ -419,6 +425,8 @@ Global options:
   --dry-run                 Print the runtime asset plan without downloading
   --skip-lua-runtime        Do not install the Lua runtime archive
   --skip-luaskills-ffi      Do not install the luaskills FFI SDK archive
+  --managed-runtimes <mode> Install managed child runtimes: none, all, python, node, package-managers
+  --force-managed-runtimes  Replace existing managed child runtime directories
 `);
 }
 
