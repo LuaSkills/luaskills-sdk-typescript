@@ -60,7 +60,7 @@ Managed Python and Node.js child runtimes are optional. Use `--managed-runtimes 
 
 Managed child runtimes support Windows x64, Linux x64/ARM64, and macOS x64/ARM64. Windows ARM is explicitly rejected before any download or target-directory creation. The npm package includes standalone `scripts/deps/fetch_managed_runtimes.ps1`, `scripts/deps/fetch_managed_runtimes.sh`, and `scripts/debug-tools/managed_runtime_layout_check.py` tools for preparing and validating debug runtime roots.
 
-The current exact managed dependency versions are Python `3.12.7`, uv `0.11.17`, Node.js `22.11.0`, and pnpm `9.15.0`. Package `dependencies.yaml` files must declare the same exact runtime and package-manager versions unless the host deliberately installs another supported version.
+The current exact managed dependency versions are Python `3.14.4`, uv `0.11.28`, Node.js `24.18.0`, and pnpm `11.11.0`. Package `dependencies.yaml` files must declare the same exact runtime and package-manager versions unless the host deliberately installs another supported version.
 
 The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime packages from the compatible `0.1` series by selecting the newest published patch automatically.
 
