@@ -34,6 +34,16 @@ function resolveSdkOptions(runtimeRoot) {
 function main() {
   const runtimeRoot = resolveRuntimeRoot();
   const skillRoots = RuntimeRoots.standard(runtimeRoot);
+  // SystemPackageRoot is the trusted package root retained for the complete lease lifetime.
+  // SystemPackageRoot 是在完整租约生命周期内保持可信的包根。
+  const systemPackageRoot = resolve(runtimeRoot, "system_lua_lib", "runtime-lease-example");
+  // SystemPackage binds the stable package identity and exact dependency manifest.
+  // SystemPackage 绑定稳定包身份与精确依赖清单。
+  const systemPackage = {
+    id: "runtime-lease-example",
+    root: systemPackageRoot,
+    dependencies_file: resolve(systemPackageRoot, "dependencies.json"),
+  };
   const client = LuaSkillsClient.create(resolveSdkOptions(runtimeRoot));
 
   try {
@@ -53,8 +63,9 @@ function main() {
     );
 
     const session = sessions.createHandle(RUNTIME_SESSION_SID, 600, true, {
-      cwd: `${runtimeRoot}/system_lua_lib`,
+      cwd: systemPackageRoot,
       mounts: { example: "typescript-runtime-lease" },
+      system_package: systemPackage,
     });
     const identity = session.identityPayload();
     console.log("Lease created:", identity.lease_id);
