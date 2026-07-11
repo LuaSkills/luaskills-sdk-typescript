@@ -42,7 +42,7 @@ function main() {
   const systemPackage = {
     id: "runtime-lease-example",
     root: systemPackageRoot,
-    dependencies_file: resolve(systemPackageRoot, "dependencies.json"),
+    dependencies_file: "dependencies.json",
   };
   const client = LuaSkillsClient.create(resolveSdkOptions(runtimeRoot));
 
