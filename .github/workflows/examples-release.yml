@@ -18,7 +18,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Resolve release version
         id: version
@@ -56,7 +56,7 @@ jobs:
               "example:query": "node examples/query.mjs",
               "example:call": "node examples/call.mjs",
               "example:lifecycle": "node examples/lifecycle.mjs",
-              "example:runtime-session": "node examples/runtime-session.mjs",
+              "example:runtime-lease": "node examples/runtime-lease.mjs",
               "example:provider-callback": "node examples/provider-callback.mjs"
             },
             "dependencies": {
@@ -76,7 +76,7 @@ jobs:
           npm run install-runtime
           npm run example:basic
           npm run example:query
-          npm run example:runtime-session
+          npm run example:runtime-lease
           \`\`\`
 
           Main repository: https://github.com/LuaSkills/luaskills
@@ -102,7 +102,7 @@ jobs:
           npm run example:query
           npm run example:call
           npm run example:lifecycle
-          npm run example:runtime-session
+          npm run example:runtime-lease
           npm run example:provider-callback
 
       - name: Package examples asset
