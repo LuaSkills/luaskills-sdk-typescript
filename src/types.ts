@@ -11,6 +11,86 @@ export type JsonValue =
   | { [key: string]: JsonValue | undefined };
 
 /**
+ * Host-selected managed interpreter family.
+ * 宿主选择的受管解释器类型。
+ */
+export type ManagedRuntimeKind = "python" | "node";
+
+/**
+ * Host-selected managed Python/Node Worker and persistent-session resource policy.
+ * 宿主选择的受管 Python/Node Worker 与持久会话资源策略。
+ */
+export interface LuaRuntimeManagedRuntimeConfig {
+  /**
+   * Maximum live Workers for one exact environment and package-owner pool key.
+   * 单个精确环境与包所有者池键允许的最大活动 Worker 数量。
+   */
+  worker_pool_max_size_per_environment: number;
+  /**
+   * Idle seconds after which an unused Worker may be retired.
+   * 未使用 Worker 可被回收前的空闲秒数。
+   */
+  worker_idle_ttl_secs: number;
+  /**
+   * Maximum launching or live persistent sessions retained by one engine.
+   * 单个引擎允许保留的启动中或活动持久会话最大数量。
+   */
+  persistent_session_limit_per_engine: number;
+  /**
+   * Default retained bytes for each persistent-session stdout or stderr stream.
+   * 每个持久会话 stdout 或 stderr 流默认保留的字节数。
+   */
+  persistent_session_default_buffer_limit_bytes_per_stream: number;
+  /**
+   * Default positive invoke timeout in milliseconds; null means unlimited.
+   * 默认正数 invoke 超时毫秒数；null 表示无限制。
+   */
+  invoke_default_timeout_ms: number | null;
+}
+
+/**
+ * Validated host-visible managed runtime installation returned by LuaSkills.
+ * LuaSkills 返回的已校验宿主可见受管运行时安装。
+ */
+export interface ManagedRuntimeInstallDescriptor {
+  /**
+   * Exact managed interpreter family.
+   * 精确受管解释器类型。
+   */
+  runtime: ManagedRuntimeKind;
+  /**
+   * Exact semantic runtime version.
+   * 精确语义化运行时版本。
+   */
+  version: string;
+  /**
+   * Normalized LuaSkills platform key.
+   * 规范化 LuaSkills 平台键。
+   */
+  platform: string;
+  /**
+   * Canonical installation directory.
+   * 规范安装目录。
+   */
+  install_root: string;
+  /**
+   * Canonical interpreter executable path.
+   * 规范解释器可执行文件路径。
+   */
+  executable: string;
+  /**
+   * SHA-256 digest of runtime-manifest.json.
+   * runtime-manifest.json 的 SHA-256 摘要。
+   */
+  manifest_hash: string;
+  /**
+   * SHA-256 digest of the interpreter executable.
+   * 解释器可执行文件的 SHA-256 摘要。
+   */
+  executable_hash: string;
+}
+
+/**
  * Host-injected authority used by visibility queries and system management calls.
  * 可见性查询与 system 管理调用使用的宿主注入权限。
  */
@@ -188,6 +268,21 @@ export interface LuaRuntimeHostOptions {
    * 用于推导固定 LuaSkills 布局的规范 runtime root。
    */
   runtime_root: string | null;
+  /**
+   * Optional absolute root that directly contains managed python and node distributions.
+   * 可选的绝对发行根，直接包含受管 python 与 node 目录。
+   */
+  managed_runtime_distribution_root: string | null;
+  /**
+   * Optional absolute writable root that owns managed Python and Node.js environments.
+   * 可选的绝对可写根，用于保存受管 Python 与 Node.js 环境。
+   */
+  managed_runtime_environment_root: string | null;
+  /**
+   * Host-selected managed Worker and persistent-session resource policy.
+   * 宿主选择的受管 Worker 与持久会话资源策略。
+   */
+  managed_runtime_config: LuaRuntimeManagedRuntimeConfig;
   /**
    * Temporary directory used by runtime helpers.
    * 运行时辅助功能使用的临时目录。
@@ -1214,4 +1309,31 @@ export interface LuaSkillsSdkOptions {
    * 用于解析已安装 SDK 资产的可选 runtime root。
    */
   runtimeRoot?: string;
+}
+
+/**
+ * Options for the read-only managed runtime installation resolver.
+ * 只读受管运行时安装解析器选项。
+ */
+export interface ManagedRuntimeResolveOptions extends LuaSkillsSdkOptions {
+  /**
+   * Existing absolute root that directly contains python and node.
+   * 直接包含 python 与 node 的现有绝对根。
+   */
+  distributionRoot: string;
+  /**
+   * Exact managed interpreter family.
+   * 精确受管解释器类型。
+   */
+  runtime: ManagedRuntimeKind;
+  /**
+   * Exact semantic runtime version.
+   * 精确语义化运行时版本。
+   */
+  version: string;
+  /**
+   * Exact normalized LuaSkills platform key.
+   * 精确规范化 LuaSkills 平台键。
+   */
+  platform: string;
 }

@@ -11,6 +11,7 @@ export {
   SystemSkillManagementClient,
   createEngineOptions,
   defaultHostOptions,
+  defaultManagedRuntimeConfig,
   defaultPoolConfig,
   defaultSpaceControllerOptions,
   requireRuntimeLeaseNumberField,

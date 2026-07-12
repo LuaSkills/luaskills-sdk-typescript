@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { LuaSkillsJsonFfi, type ManagedSessionWakeCallback } from "./ffi.js";
 import { RuntimeRoots } from "./roots.js";
 import { hostOptionsFromRuntimeManifest, loadRuntimeInstallManifestSync } from "./runtime-assets.js";
@@ -12,9 +12,12 @@ import {
   type JsonValue,
   type LuaEngineOptions,
   type LuaInvocationContext,
+  type ManagedRuntimeInstallDescriptor,
+  type ManagedRuntimeResolveOptions,
   type RuntimeLeaseCreateOptions,
   type LuaRuntimeCapabilityOptions,
   type LuaRuntimeHostOptions,
+  type LuaRuntimeManagedRuntimeConfig,
   type LuaRuntimeSpaceControllerOptions,
   type LuaSkillsClientOptions,
   type LuaSkillsSdkOptions,
@@ -260,6 +263,36 @@ export class LuaSkillsClient {
    */
   static describe(options: LuaSkillsSdkOptions = {}): FfiDescribeResult {
     return new LuaSkillsJsonFfi(options).callJsonNoInput<FfiDescribeResult>("luaskills_ffi_describe_json");
+  }
+
+  /**
+   * Resolve and validate one host-shared managed Python or Node.js installation without creating an engine.
+   * 不创建引擎，解析并校验一个由宿主共享的受管 Python 或 Node.js 安装。
+   *
+   * @param options Exact distribution root, runtime family, semantic version, platform, and FFI discovery inputs.
+   * @returns Canonical installation paths and SHA-256 identities validated by LuaSkills.
+   * @param options 精确发行根、运行时类型、语义化版本、平台与 FFI 发现参数。
+   * @returns LuaSkills 校验后的规范安装路径与 SHA-256 身份。
+   */
+  static resolveManagedRuntimeInstall(options: ManagedRuntimeResolveOptions): ManagedRuntimeInstallDescriptor {
+    if (options.runtime !== "python" && options.runtime !== "node") {
+      throw new Error("runtime must be either 'python' or 'node'");
+    }
+    if (!isAbsolute(options.distributionRoot)) {
+      throw new Error("distributionRoot must be an absolute path");
+    }
+    // DistributionRoot is normalized once before crossing the native boundary.
+    // DistributionRoot 在跨越原生边界前统一规范化一次。
+    const distributionRoot = resolve(options.distributionRoot);
+    return new LuaSkillsJsonFfi(options).callJson<ManagedRuntimeInstallDescriptor>(
+      "luaskills_ffi_managed_runtime_resolve_json",
+      {
+        distribution_root: distributionRoot,
+        runtime: options.runtime,
+        version: options.version,
+        platform: options.platform,
+      },
+    );
   }
 
   /**
@@ -1570,6 +1603,20 @@ export function defaultPoolConfig(): LuaVmPoolConfig {
 }
 
 /**
+ * Return the stable managed Python/Node Worker and persistent-session defaults.
+ * 返回稳定的受管 Python/Node Worker 与持久会话默认值。
+ */
+export function defaultManagedRuntimeConfig(): LuaRuntimeManagedRuntimeConfig {
+  return {
+    worker_pool_max_size_per_environment: 4,
+    worker_idle_ttl_secs: 60,
+    persistent_session_limit_per_engine: 256,
+    persistent_session_default_buffer_limit_bytes_per_stream: 1024 * 1024,
+    invoke_default_timeout_ms: null,
+  };
+}
+
+/**
  * Return the SDK default host options for one runtime root.
  * 返回单个 runtime root 对应的 SDK 默认宿主选项。
  */
@@ -1577,6 +1624,9 @@ export function defaultHostOptions(runtimeRoot: string): LuaRuntimeHostOptions {
   const root = resolve(runtimeRoot);
   const baseOptions: LuaRuntimeHostOptions = {
     runtime_root: root,
+    managed_runtime_distribution_root: null,
+    managed_runtime_environment_root: null,
+    managed_runtime_config: defaultManagedRuntimeConfig(),
     temp_dir: null,
     resources_dir: null,
     lua_packages_dir: null,

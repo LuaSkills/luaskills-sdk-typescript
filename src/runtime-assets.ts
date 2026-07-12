@@ -24,7 +24,7 @@ const SHA512_BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
  * Default LuaSkills release tag used by SDK runtime installation.
  * SDK 运行时安装使用的默认 LuaSkills 发布标签。
  */
-export const DEFAULT_LUASKILLS_VERSION = "v0.5.0";
+export const DEFAULT_LUASKILLS_VERSION = "v0.5.1";
 
 /**
  * Default luaskills-packages release series used by SDK runtime installation.
@@ -54,7 +54,7 @@ export const DEFAULT_VLDB_LANCEDB_VERSION = "v0.1.5";
  * Default managed CPython version installed for Lua-driven child runtimes.
  * Lua 调度子运行时安装使用的默认受管 CPython 版本。
  */
-export const DEFAULT_MANAGED_PYTHON_VERSION = "3.14.4";
+export const DEFAULT_MANAGED_PYTHON_VERSION = "3.14.6";
 
 /**
  * Default standalone uv version used to install managed Python environments.

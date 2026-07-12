@@ -22,6 +22,7 @@ const testFiles = [
   "runtime-archive-validation.mjs",
   "runtime-checksum-validation.mjs",
   "runtime-managed-path-validation.mjs",
+  "managed-runtime-host-roots.mjs",
 ];
 
 for (const testFile of testFiles) {

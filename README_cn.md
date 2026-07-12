@@ -10,6 +10,8 @@ SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正
 
 ## 安装
 
+0.5.1 SDK 要求 Node.js 24 LTS 或更高版本。
+
 ```bash
 npm install @luaskills/sdk
 ```
@@ -35,7 +37,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_as
 RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all vldb-controller
 ```
 
-目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.5.0`，并允许显式覆盖发布版本。
+目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.5.1`，并允许显式覆盖发布版本。
 
 `install-runtime` 会下载 GitHub Release 资产、校验 `.sha256` 旁路文件、解压原生文件与 Lua runtime 包，并写入：
 
@@ -60,16 +62,52 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 
 受管子运行时支持 Windows x64、Linux x64/ARM64 与 macOS x64/ARM64。Windows ARM 会在任何下载或目标目录创建前被明确拒绝。npm 包还包含 `scripts/deps/fetch_managed_runtimes.ps1`、`scripts/deps/fetch_managed_runtimes.sh` 与 `scripts/debug-tools/managed_runtime_layout_check.py` 独立工具，用于准备和校验 debug 运行时根目录。
 
-当前受管依赖精确版本为 Python `3.14.4`、uv `0.11.28`、Node.js `24.18.0`、pnpm `11.11.0`。除非宿主有意安装其他受支持版本，否则包内 `dependencies.yaml` 必须声明相同的运行时与包管理器精确版本。
+当前受管依赖精确版本为 Python `3.14.6`、uv `0.11.28`、Node.js `24.18.0`、pnpm `11.11.0`。除非宿主有意安装其他受支持版本，否则包内 `dependencies.yaml` 必须声明相同的运行时与包管理器精确版本。
+
+### 宿主指定受管运行时根
+
+LuaSkills 0.5.1 将 LuaSkills 数据根、只读解释器发行根和可写受管环境根拆分为三个边界。两个显式受管根都必须是绝对路径；未设置时继续使用兼容的 `runtimeRoot/dependencies/runtimes` 与 `runtimeRoot/dependencies/envs` 布局。
+
+```ts
+import { LuaSkillsClient } from "@luaskills/sdk";
+
+const distributionRoot = "D:/VulcanCode/dependencies/runtimes";
+const client = LuaSkillsClient.create({
+  runtimeRoot: "D:/VulcanCodeData/luaskills",
+  hostOptions: {
+    managed_runtime_distribution_root: distributionRoot,
+    managed_runtime_environment_root: "D:/VulcanCodeData/managed-runtime-envs",
+    managed_runtime_config: {
+      worker_pool_max_size_per_environment: 8,
+      worker_idle_ttl_secs: 120,
+      persistent_session_limit_per_engine: 128,
+      persistent_session_default_buffer_limit_bytes_per_stream: 2 * 1024 * 1024,
+      invoke_default_timeout_ms: 30_000,
+    },
+  },
+});
+
+const pythonInstall = LuaSkillsClient.resolveManagedRuntimeInstall({
+  runtimeRoot: "D:/VulcanCodeData/luaskills",
+  distributionRoot,
+  runtime: "python",
+  version: "3.14.6",
+  platform: "windows-x64",
+});
+```
+
+`defaultManagedRuntimeConfig()` 返回稳定引擎默认值：单个精确环境/包所有者池 `4` 个 Worker、空闲 `60` 秒、`256` 个持久会话、每个 Session 输出流 `1 MiB`，且 invoke 无默认超时。调整单项时应从这份完整对象开始。所有配置数值必须为正；单次 `invoke.timeout_ms` 与单个 Session 的 `session.open.buffer_limit_bytes` 只覆盖各自对应的引擎默认值。
+
+独立拉取与调试工具通过 `-DistributionRoot` 或 `MANAGED_RUNTIME_DISTRIBUTION_ROOT` 接受同一拆分布局，并通过 `--distribution-root` 与 `--environment-root` 校验两个显式根。
 
 默认情况下，SDK 会把 LuaSkills core 固定到自身对应版本，并从兼容的 `0.1` 协议线中自动解析最新已发布的 runtime packages patch 版本。
 
 ## 版本对齐
 
 - 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
-- 当前 SDK 默认指向 LuaSkills core 标签 `v0.5.0`。
+- 当前 SDK 默认指向 LuaSkills core 标签 `v0.5.1`。
 - runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
-- SDK 默认 host options 现在只传 `runtime_root`；LuaSkills 会自动推导 `bin`、`libs`、`lua_packages`、`resources`、`skills`、`temp`、`dependencies`、`state`、`databases`、`config` 与 `system_lua_lib`。
+- SDK 默认 host options 传入 `runtime_root`、两个空的受管根覆盖槽与完整稳定的 `managed_runtime_config`；宿主未显式覆盖时，LuaSkills 会推导固定数据布局。
 - 宿主工具直接放在 `runtime_root/bin`，不再放到 `runtime_root/bin/tools`。
 
 ```powershell
@@ -240,7 +278,7 @@ try {
 - canonical `change_set` 现在使用文件生命周期记录；`modify` 通过 hunk 级 `before + delete[] + insert[] + after` 表达具体修改。
 - `create` 与 `delete` 文件记录直接携带整文件 `content`，`rename` 记录携带 `old_path` 与 `new_path`。
 - 普通租约接受 `cwd`、`workspace_root`、`lua_roots`、`c_roots`、`mounts`。System 租约强制要求 `system_package`，拒绝 `lua_roots/c_roots`，并从可信包清单推导根目录。
-- `pollManagedSessionEvents()`、`waitManagedSessionEvents()`、`setManagedSessionWakeCallback()` 暴露 0.5.0 事件接口。
+- `pollManagedSessionEvents()`、`waitManagedSessionEvents()`、`setManagedSessionWakeCallback()` 暴露 0.5.1 事件接口。
 - 源码树示例现在会优先加载已安装发布包；拿不到时再回退到本地 `dist` 构建产物，因此仓库内烟测与独立 examples 包可以共用同一套脚本。
 
 ## JSON Provider Callback
