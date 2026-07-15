@@ -24,7 +24,7 @@ const SHA512_BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
  * Default LuaSkills release tag used by SDK runtime installation.
  * SDK 运行时安装使用的默认 LuaSkills 发布标签。
  */
-export const DEFAULT_LUASKILLS_VERSION = "v0.5.2";
+export const DEFAULT_LUASKILLS_VERSION = "v0.5.3";
 
 /**
  * Default luaskills-packages release series used by SDK runtime installation.

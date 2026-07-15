@@ -6,13 +6,13 @@ LuaSkills 主仓库：[LuaSkills/luaskills](https://github.com/LuaSkills/luaskil
 
 TypeScript / Node.js SDK，用于通过公共 JSON FFI 接入 LuaSkills 运行时。
 
-`0.5.2` 是当前稳定补丁版本。它保持 `0.5.1` 宿主 API 不变，并把运行时资产默认值切换到 LuaSkills core `v0.5.2`；Windows System 租约子进程会继续停留在已授权包 cwd 内。
+`0.5.3` 是当前稳定补丁版本。它保持 `0.5.2` 宿主 API 不变，并把运行时资产默认值切换到 LuaSkills core `v0.5.3`；该版本保持 JSON 容器类型并严格处理 Windows verbatim 路径边界。
 
 SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正式 skill root、带权限语义的管理调用、skill config、provider callback、宿主工具 callback 与 runtime 资产安装。宿主在常规集成中不需要手写底层 FFI buffer 或 JSON 包络。
 
 ## 安装
 
-0.5.2 SDK 要求 Node.js 24 LTS 或更高版本。
+0.5.3 SDK 要求 Node.js 24 LTS 或更高版本。
 
 ```bash
 npm install @luaskills/sdk
@@ -39,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_as
 RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all vldb-controller
 ```
 
-目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.5.2`，并允许显式覆盖发布版本。
+目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.5.3`，并允许显式覆盖发布版本。
 
 `install-runtime` 会下载 GitHub Release 资产、校验 `.sha256` 旁路文件、解压原生文件与 Lua runtime 包，并写入：
 
@@ -107,7 +107,7 @@ const pythonInstall = LuaSkillsClient.resolveManagedRuntimeInstall({
 ## 版本对齐
 
 - 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
-- 当前 SDK 默认指向 LuaSkills core 标签 `v0.5.2`。
+- 当前 SDK 默认指向 LuaSkills core 标签 `v0.5.3`。
 - runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
 - SDK 默认 host options 传入 `runtime_root`、两个空的受管根覆盖槽与完整稳定的 `managed_runtime_config`；宿主未显式覆盖时，LuaSkills 会推导固定数据布局。
 - 宿主工具直接放在 `runtime_root/bin`，不再放到 `runtime_root/bin/tools`。
