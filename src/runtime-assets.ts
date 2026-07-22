@@ -36,13 +36,13 @@ export const DEFAULT_LUASKILLS_PACKAGES_SERIES = "0.1";
  * Default vldb-controller release tag used by SDK runtime installation.
  * SDK 运行时安装使用的默认 vldb-controller 发布标签。
  */
-export const DEFAULT_VLDB_CONTROLLER_VERSION = "v0.2.1";
+export const DEFAULT_VLDB_CONTROLLER_VERSION = "v0.2.3";
 
 /**
  * Default vldb-sqlite release tag used by SDK runtime installation.
  * SDK 运行时安装使用的默认 vldb-sqlite 发布标签。
  */
-export const DEFAULT_VLDB_SQLITE_VERSION = "v0.1.5";
+export const DEFAULT_VLDB_SQLITE_VERSION = "v0.1.6";
 
 /**
  * Default vldb-lancedb release tag used by SDK runtime installation.
