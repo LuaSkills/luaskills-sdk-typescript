@@ -339,10 +339,20 @@ export interface LuaRuntimeHostOptions {
    */
   database_dir_name: string;
   /**
-   * Optional unified skill config file path.
-   * 可选统一 skill 配置文件路径。
+   * Optional explicit user-level root for normal and system skill configuration stores.
+   * 普通技能与系统技能配置存储使用的可选显式用户级根目录。
    */
-  skill_config_file_path: string | null;
+  skill_config_root: string | null;
+  /**
+   * Optional cross-process configuration lock timeout in milliseconds.
+   * 可选配置跨进程锁超时毫秒数。
+   */
+  skill_config_lock_timeout_ms: number | null;
+  /**
+   * Optional configuration watcher debounce interval in milliseconds.
+   * 可选配置监听防抖毫秒数。
+   */
+  skill_config_watch_debounce_ms: number | null;
   /**
    * Whether network downloads are allowed.
    * 是否允许网络下载。
@@ -931,6 +941,11 @@ export interface RuntimeAckResult {
  */
 export interface SkillConfigEntry {
   /**
+   * Persisted store containing this raw record.
+   * 包含当前原始记录的持久化存储。
+   */
+  store_scope: SkillConfigStoreScope;
+  /**
    * Owning skill id.
    * 所属 skill id。
    */
@@ -975,36 +990,443 @@ export interface SkillConfigGetResult {
 }
 
 /**
- * Skill-config mutation result.
- * skill 配置变更结果。
+ * Typed scalar accepted by package-configuration writes.
+ * 技能包配置写入接受的类型化标量。
  */
-export interface SkillConfigMutationResult {
-  /**
-   * Mutation action name.
-   * 变更动作名称。
-   */
-  action: "set" | "delete" | string;
-  /**
-   * Touched skill id.
-   * 被触及的 skill id。
-   */
-  skill_id: string;
-  /**
-   * Touched config key.
-   * 被触及的配置键。
-   */
-  key: string;
-  /**
-   * Optional value returned by set.
-   * set 返回的可选值。
-   */
-  value?: string | null;
-  /**
-   * Optional delete flag returned by delete.
-   * delete 返回的可选删除标记。
-   */
-  deleted?: boolean | null;
+export type SkillConfigValue = string | number | boolean;
+
+/**
+ * Result of one atomic package-configuration write.
+ * 单次原子技能包配置写入结果。
+ */
+export interface SkillConfigWriteResult {
+  /** Revision visible after the transaction.
+   * 事务完成后可见的修订号。 */
+  revision: string;
+  /** Whether persisted data changed.
+   * 持久化数据是否发生变化。 */
+  changed: boolean;
+  /** Canonical persisted values submitted by the transaction.
+   * 当前事务提交的规范持久化值。 */
+  values: Record<string, string>;
+  /** Stable sorted keys changed by the transaction.
+   * 当前事务变更的稳定排序键。 */
+  changed_keys: string[];
 }
+
+/**
+ * Result of one compare-and-swap deletion.
+ * 单次比较并交换删除结果。
+ */
+export interface SkillConfigDeleteResult {
+  /** Revision visible after deletion.
+   * 删除完成后可见的修订号。 */
+  revision: string;
+  /** Whether one persisted value was removed.
+   * 是否移除了一个持久化值。 */
+  deleted: boolean;
+  /** Exact targeted key.
+   * 精确目标键。 */
+  key: string;
+}
+
+/**
+ * Optional compare-and-swap controls for configuration mutations.
+ * 配置变更使用的可选比较并交换控制项。
+ */
+export interface SkillConfigMutationOptions {
+  /** Expected current decimal revision.
+   * 预期的当前十进制修订号。 */
+  expectedRevision?: string;
+}
+
+/**
+ * Declared package-configuration scalar type.
+ * 已声明的技能包配置标量类型。
+ */
+export type SkillPackageConfigType = (typeof SKILL_PACKAGE_CONFIG_TYPES)[number];
+
+/**
+ * Optional host rendering format.
+ * 可选的宿主渲染格式。
+ */
+export type SkillPackageConfigFormat = (typeof SKILL_PACKAGE_CONFIG_FORMATS)[number];
+
+/**
+ * Unambiguous runtime state of one declared item.
+ * 单个已声明配置项的无歧义运行时状态。
+ */
+export type SkillPackageConfigItemState = (typeof SKILL_PACKAGE_CONFIG_STATES)[number];
+
+/**
+ * Type-specific declaration constraints.
+ * 类型专属声明约束。
+ */
+export interface SkillPackageConfigConstraints {
+  /** Optional inclusive numeric lower bound.
+   * 可选的包含式数值下界。 */
+  minimum?: number;
+  /** Optional inclusive numeric upper bound.
+   * 可选的包含式数值上界。 */
+  maximum?: number;
+  /** Optional minimum Unicode scalar count.
+   * 可选的最小 Unicode 标量数量。 */
+  min_length?: number;
+  /** Optional maximum Unicode scalar count.
+   * 可选的最大 Unicode 标量数量。 */
+  max_length?: number;
+}
+
+/**
+ * One declared enumeration option.
+ * 单个已声明枚举选项。
+ */
+export interface SkillPackageConfigEnumOption {
+  /** Stable persisted machine value.
+   * 稳定的持久化机器值。 */
+  value: string;
+  /** Package-authored display label.
+   * 技能包编写的显示名称。 */
+  label: string;
+  /** Package-authored explanation.
+   * 技能包编写的说明。 */
+  description: string;
+}
+
+/**
+ * Manifest-level package configuration declaration.
+ * 清单级技能包配置声明。
+ */
+export interface SkillPackageConfigDeclaration {
+  /** Stable package configuration key.
+   * 稳定的技能包配置键。 */
+  key: string;
+  /** Declared scalar type.
+   * 已声明标量类型。 */
+  type: SkillPackageConfigType;
+  /** Whether completeness requires a value.
+   * 完整性是否要求存在值。 */
+  required: boolean;
+  /** Host policy hint for sensitive values.
+   * 敏感值使用的宿主策略提示。 */
+  sensitive: boolean;
+  /** Package-authored description.
+   * 技能包编写的说明。 */
+  description: string;
+  /** Type-specific constraints.
+   * 类型专属约束。 */
+  constraints: SkillPackageConfigConstraints;
+  /** Enumeration options, empty for other types.
+   * 枚举选项，其他类型为空。 */
+  options: SkillPackageConfigEnumOption[];
+  /** Optional typed default.
+   * 可选类型化默认值。 */
+  default?: SkillConfigValue;
+  /** Optional short title.
+   * 可选短标题。 */
+  title?: string;
+  /** Optional host grouping hint.
+   * 可选宿主分组提示。 */
+  group?: string;
+  /** Optional display order.
+   * 可选显示顺序。 */
+  order?: number;
+  /** Whether the item is advanced.
+   * 当前项是否为高级项。 */
+  advanced: boolean;
+  /** Optional input placeholder.
+   * 可选输入占位文本。 */
+  placeholder?: string;
+  /** Optional typed example.
+   * 可选类型化示例。 */
+  example?: SkillConfigValue;
+  /** Optional rendering format.
+   * 可选渲染格式。 */
+  format?: SkillPackageConfigFormat;
+  /** Whether a host-managed restart may be required.
+   * 是否可能需要宿主管理的重启。 */
+  restart_required: boolean;
+  /** Whether the declaration is deprecated.
+   * 当前声明是否已弃用。 */
+  deprecated: boolean;
+  /** Optional deprecation guidance.
+   * 可选弃用说明。 */
+  deprecation_message?: string;
+}
+
+/**
+ * Structured validation failure attached to one item.
+ * 附加到单个配置项的结构化校验失败。
+ */
+export interface SkillPackageConfigValidationError {
+  /** Stable machine-readable validation code.
+   * 稳定机器可读校验代码。 */
+  code: string;
+  /** Human-readable value-safe explanation.
+   * 人类可读且不泄漏值的说明。 */
+  message: string;
+}
+
+/**
+ * Runtime descriptor for one declared item.
+ * 单个已声明配置项的运行时描述。
+ */
+export interface SkillPackageConfigItemDescriptor extends SkillPackageConfigDeclaration {
+  /** Current unambiguous state.
+   * 当前无歧义状态。 */
+  state: SkillPackageConfigItemState;
+  /** Whether the current item satisfies completeness.
+   * 当前项是否满足完整性。 */
+  satisfied: boolean;
+  /** Optional validation failure.
+   * 可选校验失败。 */
+  validation_error?: SkillPackageConfigValidationError;
+  /** Unmasked effective value included only by host opt-in.
+   * 仅由宿主显式选择后包含的未遮罩有效值。 */
+  value?: string;
+}
+
+/**
+ * One key-owned configuration issue.
+ * 单个配置键所属的问题。
+ */
+export interface SkillPackageConfigIssue {
+  /** Stable owning key.
+   * 稳定所属键。 */
+  key: string;
+  /** Stable machine-readable code.
+   * 稳定机器可读代码。 */
+  code: string;
+  /** Human-readable explanation.
+   * 人类可读说明。 */
+  message: string;
+}
+
+/**
+ * One optional-key business validation issue.
+ * 单个可选键业务校验问题。
+ */
+export interface SkillPackageConfigBusinessIssue {
+  /** Optional associated declared key.
+   * 可选关联已声明键。 */
+  key?: string;
+  /** Stable package-namespaced code.
+   * 稳定且带技能包命名空间的代码。 */
+  code: string;
+  /** Package-authored value-safe explanation.
+   * 技能包编写且不泄漏敏感值的说明。 */
+  message: string;
+}
+
+/**
+ * Completeness and validity status of one effective package.
+ * 单个有效技能包的完整性与合法性状态。
+ */
+export interface SkillPackageConfigStatus {
+  /** Stable package identifier.
+   * 稳定技能包标识符。 */
+  skill_id: string;
+  /** Whether the package configuration is complete.
+   * 技能包配置是否完整。 */
+  complete: boolean;
+  /** Snapshot revision used by this status.
+   * 当前状态使用的快照修订号。 */
+  revision: string;
+  /** Persisted store scope.
+   * 持久化存储作用域。 */
+  store_scope: SkillConfigStoreScope;
+  /** Missing required declarations.
+   * 缺失的必填声明。 */
+  missing: SkillPackageConfigIssue[];
+  /** Invalid persisted declared values.
+   * 非法的持久化已声明值。 */
+  invalid: SkillPackageConfigIssue[];
+  /** Cross-field business issues.
+   * 跨字段业务问题。 */
+  business_issues: SkillPackageConfigBusinessIssue[];
+  /** Persisted keys no longer declared.
+   * 不再声明的持久化键。 */
+  orphaned: string[];
+  /** Number of orphaned keys.
+   * 遗留键数量。 */
+  orphaned_count: number;
+}
+
+/**
+ * Effective package configuration descriptor.
+ * 有效技能包配置描述。
+ */
+export interface SkillPackageConfigDescriptor {
+  /** Stable package identifier.
+   * 稳定技能包标识符。 */
+  skill_id: string;
+  /** Semantic package version.
+   * 语义化技能包版本。 */
+  skill_version: string;
+  /** Whether configuration is complete.
+   * 配置是否完整。 */
+  complete: boolean;
+  /** Snapshot revision.
+   * 快照修订号。 */
+  revision: string;
+  /** Persisted store scope.
+   * 持久化存储作用域。 */
+  store_scope: SkillConfigStoreScope;
+  /** Missing item count.
+   * 缺失项数量。 */
+  missing_count: number;
+  /** Invalid item count.
+   * 非法项数量。 */
+  invalid_count: number;
+  /** Business issue count.
+   * 业务问题数量。 */
+  business_issue_count: number;
+  /** Orphaned key count.
+   * 遗留键数量。 */
+  orphaned_count: number;
+  /** Orphaned keys.
+   * 遗留键。 */
+  orphaned: string[];
+  /** Declared runtime items.
+   * 已声明运行时配置项。 */
+  items: SkillPackageConfigItemDescriptor[];
+}
+
+/**
+ * Physical installed package declaration descriptor.
+ * 物理已安装技能包声明描述。
+ */
+export interface InstalledSkillPackageConfigDescriptor {
+  /** Directory-derived package identifier.
+   * 目录派生的技能包标识符。 */
+  skill_id: string;
+  /** Owning root name.
+   * 所属根名称。 */
+  root_name: string;
+  /** Absolute package path.
+   * 技能包绝对路径。 */
+  absolute_path: string;
+  /** Whether the manifest enables the package.
+   * 清单是否启用技能包。 */
+  enabled: boolean;
+  /** Whether an earlier root shadows this package.
+   * 是否被更高优先级根遮蔽。 */
+  shadowed: boolean;
+  /** Whether this physical instance is effective.
+   * 当前物理实例是否生效。 */
+  effective: boolean;
+  /** Whether the manifest is valid.
+   * 清单是否合法。 */
+  manifest_valid: boolean;
+  /** Optional structured manifest issue.
+   * 可选结构化清单问题。 */
+  manifest_issue?: SkillConfigEventError;
+  /** Optional semantic package version.
+   * 可选语义化技能包版本。 */
+  skill_version?: string;
+  /** Valid package declarations.
+   * 合法技能包声明。 */
+  config?: SkillPackageConfigDeclaration[];
+}
+
+/**
+ * Options for effective or installed declaration discovery.
+ * 有效或已安装声明发现选项。
+ */
+export interface SkillPackageConfigDescribeOptions {
+  /** Optional package identifier.
+   * 可选技能包标识符。 */
+  skillId?: string;
+  /** Explicit raw-value disclosure switch for effective mode.
+   * 有效模式的显式原始值披露开关。 */
+  includeValues?: boolean;
+  /** Declaration discovery mode.
+   * 声明发现模式。 */
+  mode?: SkillPackageConfigDescribeMode;
+  /** Optional physical root filter for installed mode.
+   * 已安装模式的可选物理根过滤器。 */
+  rootName?: string;
+}
+
+/**
+ * Structured watcher or reload failure.
+ * 结构化监听或重载失败。
+ */
+export interface SkillConfigEventError {
+  /** Stable machine-readable code.
+   * 稳定机器可读代码。 */
+  code: string;
+  /** Human-readable value-safe message.
+   * 人类可读且不泄漏值的消息。 */
+  message: string;
+}
+
+/**
+ * One ordered configuration change event.
+ * 单个有序配置变更事件。
+ */
+export interface SkillConfigEvent {
+  /** Engine-local decimal sequence.
+   * 引擎内十进制序号。 */
+  sequence: string;
+  /** Stable event type.
+   * 稳定事件类型。 */
+  type: "skill_config_changed" | "skill_config_reload_failed";
+  /** Persisted store scope.
+   * 持久化存储作用域。 */
+  store_scope: SkillConfigStoreScope;
+  /** Optional changed package.
+   * 可选变更技能包。 */
+  skill_id?: string;
+  /** Last known valid revision.
+   * 最后一个已知合法修订号。 */
+  revision: string;
+  /** Stable sorted changed keys.
+   * 稳定排序的变更键。 */
+  changed_keys?: string[];
+  /** Event source.
+   * 事件来源。 */
+  source: "local_write" | "external_reload";
+  /** Changed keys recommending restart.
+   * 建议重启的变更键。 */
+  restart_required_keys?: string[];
+  /** Optional package completeness.
+   * 可选技能包完整性。 */
+  complete?: boolean;
+  /** Optional structured failure.
+   * 可选结构化失败。 */
+  error?: SkillConfigEventError;
+}
+
+/**
+ * Ordered configuration event batch.
+ * 有序配置事件批次。
+ */
+export interface SkillConfigEventBatch {
+  /** Events after the requested cursor.
+   * 请求游标之后的事件。 */
+  events: SkillConfigEvent[];
+  /** Highest observed sequence.
+   * 观察到的最高序号。 */
+  next_sequence: string;
+}
+
+/**
+ * Explicit store refresh result.
+ * 显式存储刷新结果。
+ */
+export interface SkillConfigStoreRefresh {
+  /** Refreshed store scope.
+   * 已刷新存储作用域。 */
+  store_scope: SkillConfigStoreScope;
+  /** Revision visible after refresh.
+   * 刷新后可见的修订号。 */
+  revision: string;
+  /** Whether a newer snapshot was installed.
+   * 是否安装了更新快照。 */
+  changed: boolean;
+}
+
 
 /**
  * Runtime help node summary.
@@ -1337,3 +1759,10 @@ export interface ManagedRuntimeResolveOptions extends LuaSkillsSdkOptions {
    */
   platform: string;
 }
+import {
+  SKILL_PACKAGE_CONFIG_FORMATS,
+  type SkillConfigStoreScope,
+  type SkillPackageConfigDescribeMode,
+  SKILL_PACKAGE_CONFIG_STATES,
+  SKILL_PACKAGE_CONFIG_TYPES,
+} from "./config-contract.js";

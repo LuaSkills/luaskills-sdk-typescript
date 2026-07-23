@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { join, resolve } from "node:path";
 import { LuaSkillsClient } from "./client.js";
+import type { SkillConfigStoreScope } from "./config-contract.js";
 import { RuntimeRoots } from "./roots.js";
 import { buildRuntimeInstallManifest, installRuntimeAssets, normalizeDatabasePreset, normalizeManagedRuntimeTarget, RuntimeDatabasePreset, type RuntimeInstallOptions } from "./runtime-assets.js";
-import { Authority, SkillInstallSourceType, type JsonValue, type RuntimeSkillRoot, type SkillInstallRequest } from "./types.js";
+import { Authority, SkillInstallSourceType, type JsonValue, type RuntimeSkillRoot, type SkillConfigValue, type SkillInstallRequest } from "./types.js";
 
 /**
  * Parsed command-line arguments.
@@ -54,6 +55,11 @@ async function main(): Promise<void> {
   const client = LuaSkillsClient.create({
     libraryPath: stringFlag(parsed, "lib"),
     runtimeRoot,
+    hostOptions: {
+      skill_config_root: resolve(
+        stringFlag(parsed, "skill-config-root") ?? join(runtimeRoot, "config"),
+      ),
+    },
     ensureRuntimeLayout: false,
   });
 
@@ -150,7 +156,7 @@ async function dispatchEngineCommand(
       );
       return;
     case "config":
-      dispatchConfigCommand(client, first, second, third, fourth);
+      dispatchConfigCommand(client, parsed, first, second, third, fourth);
       return;
     case "disable":
       printJson(client.skills.disable(skillRoots, requireValue(first, "disable requires <skill-id>"), second ?? null));
@@ -207,6 +213,7 @@ async function dispatchEngineCommand(
  */
 function dispatchConfigCommand(
   client: LuaSkillsClient,
+  parsed: ParsedArgs,
   subcommand: string | undefined,
   first: string | undefined,
   second: string | undefined,
@@ -219,20 +226,66 @@ function dispatchConfigCommand(
     case "get":
       printJson(client.config.get(requireValue(first, "config get requires <skill-id> <key>"), requireValue(second, "config get requires <skill-id> <key>")));
       return;
+    case "describe":
+      printJson(
+        client.config.describe({
+          skillId: first,
+          includeValues: booleanFlag(parsed, "include-values"),
+          mode: booleanFlag(parsed, "installed") ? "installed" : "effective",
+          rootName: stringFlag(parsed, "root-name"),
+        }),
+      );
+      return;
+    case "validate":
+      printJson(client.config.validate(requireValue(first, "config validate requires <skill-id>")));
+      return;
     case "set":
       printJson(
         client.config.set(
-          requireValue(first, "config set requires <skill-id> <key> <value>"),
-          requireValue(second, "config set requires <skill-id> <key> <value>"),
-          requireValue(third, "config set requires <skill-id> <key> <value>"),
+          requireValue(first, "config set requires <skill-id> <key> <value-json>"),
+          requireValue(second, "config set requires <skill-id> <key> <value-json>"),
+          parseSkillConfigValue(
+            requireValue(third, "config set requires <skill-id> <key> <value-json>"),
+          ),
+          { expectedRevision: stringFlag(parsed, "expected-revision") },
+        ),
+      );
+      return;
+    case "set-batch":
+      printJson(
+        client.config.set(
+          requireValue(first, "config set-batch requires <skill-id> <values-json>"),
+          parseSkillConfigValues(
+            requireValue(second, "config set-batch requires <skill-id> <values-json>"),
+          ),
+          { expectedRevision: stringFlag(parsed, "expected-revision") },
         ),
       );
       return;
     case "delete":
-      printJson(client.config.delete(requireValue(first, "config delete requires <skill-id> <key>"), requireValue(second, "config delete requires <skill-id> <key>")));
+      printJson(
+        client.config.delete(
+          requireValue(first, "config delete requires <skill-id> <key>"),
+          requireValue(second, "config delete requires <skill-id> <key>"),
+          { expectedRevision: stringFlag(parsed, "expected-revision") },
+        ),
+      );
+      return;
+    case "refresh":
+      printJson(client.config.refresh(first as SkillConfigStoreScope | undefined));
+      return;
+    case "events":
+      printJson(
+        client.config.pollEvents(
+          stringFlag(parsed, "after-sequence"),
+          parsePositiveIntegerFlag(parsed, "limit") ?? 100,
+        ),
+      );
       return;
     default:
-      throw new Error("config requires one of: list, get, set, delete");
+      throw new Error(
+        "config requires one of: list, describe, validate, get, set, set-batch, delete, refresh, events",
+      );
   }
 }
 
@@ -372,6 +425,82 @@ function parseJsonValue(text: string): JsonValue {
 }
 
 /**
+ * Parse one configuration scalar from JSON text.
+ * 从 JSON 文本解析单个配置标量。
+ *
+ * @param text JSON scalar text.
+ * JSON 标量文本。
+ * @returns One supported configuration scalar.
+ * 一个受支持的配置标量。
+ */
+function parseSkillConfigValue(text: string): SkillConfigValue {
+  const value = parseJsonValue(text);
+  if (
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "boolean"
+  ) {
+    throw new TypeError("configuration value JSON must be a string, number, or boolean");
+  }
+  return value;
+}
+
+/**
+ * Parse one nonempty configuration batch from JSON text.
+ * 从 JSON 文本解析一个非空配置批次。
+ *
+ * @param text JSON object text.
+ * JSON 对象文本。
+ * @returns One typed configuration batch.
+ * 一个类型化配置批次。
+ */
+function parseSkillConfigValues(text: string): Record<string, SkillConfigValue> {
+  const value = parseJsonValue(text);
+  if (value === null || Array.isArray(value) || typeof value !== "object") {
+    throw new TypeError("configuration batch JSON must be an object");
+  }
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    throw new TypeError("configuration batch JSON must not be empty");
+  }
+  const values: Record<string, SkillConfigValue> = {};
+  for (const [key, item] of entries) {
+    if (
+      typeof item !== "string" &&
+      typeof item !== "number" &&
+      typeof item !== "boolean"
+    ) {
+      throw new TypeError(`configuration '${key}' must be a string, number, or boolean`);
+    }
+    values[key] = item;
+  }
+  return values;
+}
+
+/**
+ * Parse one optional positive integer flag.
+ * 解析单个可选正整数标志。
+ *
+ * @param parsed Parsed CLI arguments.
+ * 已解析的 CLI 参数。
+ * @param name Flag name without leading dashes.
+ * 不含前导横线的标志名。
+ * @returns The parsed positive integer, or undefined when absent.
+ * 解析出的正整数；缺失时返回 undefined。
+ */
+function parsePositiveIntegerFlag(parsed: ParsedArgs, name: string): number | undefined {
+  const raw = stringFlag(parsed, name);
+  if (raw === undefined) {
+    return undefined;
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`--${name} must be a positive safe integer`);
+  }
+  return value;
+}
+
+/**
  * Require one positional value and return it.
  * 要求单个位置参数存在并返回该值。
  */
@@ -408,9 +537,14 @@ Commands:
   call <tool-name> [args-json]
   run-lua <code> [args-json]
   config list [skill-id]
+  config describe [skill-id] [--include-values] [--installed] [--root-name ROOT]
+  config validate <skill-id>
   config get <skill-id> <key>
-  config set <skill-id> <key> <value>
-  config delete <skill-id> <key>
+  config set <skill-id> <key> <value-json> [--expected-revision revision]
+  config set-batch <skill-id> <values-json> [--expected-revision revision]
+  config delete <skill-id> <key> [--expected-revision revision]
+  config refresh [skills|system-skills]
+  config events [--after-sequence sequence] [--limit count]
   install|update <source> [--skill-id id] [--target-root USER]
   uninstall <skill-id> [--target-root USER] [--remove-sqlite] [--remove-lancedb]
   system-install|system-update|system-uninstall ... [--authority system]
@@ -419,6 +553,7 @@ Commands:
 Global options:
   --lib <path>              LuaSkills dynamic library path, or LUASKILLS_LIB
   --runtime-root <path>     Shared runtime root
+  --skill-config-root <path> Explicit user-level package configuration root
   --authority <value>       delegated_tool or system
   --root-only               Use only ROOT root
   --target-root <label>     ROOT, PROJECT, or USER

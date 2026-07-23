@@ -1,4 +1,8 @@
 import { isAbsolute, join, resolve } from "node:path";
+import {
+  SKILL_CONFIG_MAXIMUM_EVENT_POLL_LIMIT,
+  type SkillConfigStoreScope,
+} from "./config-contract.js";
 import { LuaSkillsJsonFfi, type ManagedSessionWakeCallback } from "./ffi.js";
 import { RuntimeRoots } from "./roots.js";
 import { hostOptionsFromRuntimeManifest, loadRuntimeInstallManifestSync } from "./runtime-assets.js";
@@ -32,8 +36,18 @@ import {
   type RuntimeSkillRoot,
   type SkillApplyResult,
   type SkillConfigEntry,
+  type SkillConfigDeleteResult,
+  type SkillConfigEvent,
+  type SkillConfigEventBatch,
   type SkillConfigGetResult,
-  type SkillConfigMutationResult,
+  type SkillConfigMutationOptions,
+  type SkillConfigStoreRefresh,
+  type SkillConfigValue,
+  type SkillConfigWriteResult,
+  type InstalledSkillPackageConfigDescriptor,
+  type SkillPackageConfigDescribeOptions,
+  type SkillPackageConfigDescriptor,
+  type SkillPackageConfigStatus,
   type SkillInstallRequest,
   type SkillLifecycleOptions,
   type SkillUninstallOptions,
@@ -604,6 +618,56 @@ export class SkillConfigClient {
   }
 
   /**
+   * Discover declared package-configuration structure with optional values.
+   * 发现已声明的技能包配置结构并可选返回值。
+   *
+   * The host must authorize `includeValues: true`; returned values are never masked.
+   * 宿主必须授权 `includeValues: true`；返回值永不自动遮罩。
+   *
+   * @param options Optional package and explicit value-disclosure controls.
+   * 可选的技能包与显式值披露控制项。
+   * @returns One descriptor per matching effective package.
+   * 每个匹配有效技能包的描述符。
+   */
+  describe(
+    options: SkillPackageConfigDescribeOptions = {},
+  ): Array<SkillPackageConfigDescriptor | InstalledSkillPackageConfigDescriptor> {
+    return this.client.callJson<
+      Array<SkillPackageConfigDescriptor | InstalledSkillPackageConfigDescriptor>
+    >(
+      "luaskills_ffi_skill_config_describe_json",
+      {
+        engine_id: this.client.engineId,
+        skill_id: options.skillId ?? null,
+        include_values: options.includeValues ?? false,
+        mode: options.mode ?? "effective",
+        root_name: options.rootName ?? null,
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
+  }
+
+  /**
+   * Validate completeness and persisted values for one effective skill package.
+   * 校验单个有效技能包的完整性与持久化值。
+   *
+   * @param skillId Exact owning package identifier.
+   * 精确的所属技能包标识。
+   * @returns Structured completeness and validity status.
+   * 结构化完整性与合法性状态。
+   */
+  validate(skillId: string): SkillPackageConfigStatus {
+    return this.client.callJson<SkillPackageConfigStatus>(
+      "luaskills_ffi_skill_config_validate_json",
+      {
+        engine_id: this.client.engineId,
+        skill_id: skillId,
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
+  }
+
+  /**
    * Get one config value by skill id and key.
    * 按 skill id 与 key 获取单个配置值。
    */
@@ -620,17 +684,61 @@ export class SkillConfigClient {
   }
 
   /**
-   * Set one config value by skill id and key.
-   * 按 skill id 与 key 设置单个配置值。
+   * Atomically set one typed configuration value.
+   * 原子设置单个类型化配置值。
    */
-  set(skillId: string, key: string, value: string): SkillConfigMutationResult {
-    return this.client.callJson<SkillConfigMutationResult>(
+  set(
+    skillId: string,
+    key: string,
+    value: SkillConfigValue,
+    options?: SkillConfigMutationOptions,
+  ): SkillConfigWriteResult;
+
+  /**
+   * Atomically set one nonempty typed configuration batch.
+   * 原子设置一个非空类型化配置批次。
+   */
+  set(
+    skillId: string,
+    values: Record<string, SkillConfigValue>,
+    options?: SkillConfigMutationOptions,
+  ): SkillConfigWriteResult;
+
+  /**
+   * Normalize the overload into the unique batch JSON FFI request.
+   * 把重载规范化为唯一的批量 JSON FFI 请求。
+   */
+  set(
+    skillId: string,
+    keyOrValues: string | Record<string, SkillConfigValue>,
+    valueOrOptions?: SkillConfigValue | SkillConfigMutationOptions,
+    maybeOptions?: SkillConfigMutationOptions,
+  ): SkillConfigWriteResult {
+    const values =
+      typeof keyOrValues === "string"
+        ? { [keyOrValues]: valueOrOptions as SkillConfigValue }
+        : keyOrValues;
+    const options =
+      typeof keyOrValues === "string"
+        ? maybeOptions
+        : (valueOrOptions as SkillConfigMutationOptions | undefined);
+    const entries = Object.entries(values);
+    if (entries.length === 0) {
+      throw new TypeError("configuration batch must not be empty");
+    }
+    for (const [key, value] of entries) {
+      if (typeof key !== "string" || key.length === 0) {
+        throw new TypeError("configuration keys must be nonempty strings");
+      }
+      assertSafeSkillConfigValue(value, key);
+    }
+    return this.client.callJson<SkillConfigWriteResult>(
       "luaskills_ffi_skill_config_set_json",
       {
         engine_id: this.client.engineId,
         skill_id: skillId,
-        key,
-        value,
+        values,
+        expected_revision: options?.expectedRevision ?? null,
       },
       LUA_SKILLS_CLIENT_CALL_TOKEN,
     );
@@ -640,17 +748,170 @@ export class SkillConfigClient {
    * Delete one config value by skill id and key.
    * 按 skill id 与 key 删除单个配置值。
    */
-  delete(skillId: string, key: string): SkillConfigMutationResult {
-    return this.client.callJson<SkillConfigMutationResult>(
+  delete(
+    skillId: string,
+    key: string,
+    options: SkillConfigMutationOptions = {},
+  ): SkillConfigDeleteResult {
+    return this.client.callJson<SkillConfigDeleteResult>(
       "luaskills_ffi_skill_config_delete_json",
       {
         engine_id: this.client.engineId,
         skill_id: skillId,
         key,
+        expected_revision: options.expectedRevision ?? null,
       },
       LUA_SKILLS_CLIENT_CALL_TOKEN,
     );
   }
+
+  /**
+   * Explicitly refresh one selected store or both stores.
+   * 显式刷新一个选定存储或两个存储。
+   */
+  refresh(storeScope?: SkillConfigStoreScope): SkillConfigStoreRefresh[] {
+    return this.client.callJson<SkillConfigStoreRefresh[]>(
+      "luaskills_ffi_skill_config_refresh_json",
+      {
+        engine_id: this.client.engineId,
+        store_scope: storeScope ?? null,
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
+  }
+
+  /**
+   * Poll ordered configuration events after one optional cursor.
+   * 在一个可选游标之后轮询有序配置事件。
+   */
+  pollEvents(afterSequence?: string, limit = 100): SkillConfigEventBatch {
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > SKILL_CONFIG_MAXIMUM_EVENT_POLL_LIMIT
+    ) {
+      throw new RangeError(
+        `event poll limit must be a safe integer between 1 and ${SKILL_CONFIG_MAXIMUM_EVENT_POLL_LIMIT}`,
+      );
+    }
+    return this.client.callJson<SkillConfigEventBatch>(
+      "luaskills_ffi_skill_config_events_poll_json",
+      {
+        engine_id: this.client.engineId,
+        after_sequence: afterSequence ?? null,
+        limit,
+      },
+      LUA_SKILLS_CLIENT_CALL_TOKEN,
+    );
+  }
+
+  /**
+   * Wait until at least one event is available or the timeout expires.
+   * 等待至少一个事件可用或等待超时。
+   */
+  async waitForEvents(
+    afterSequence?: string,
+    options: { timeoutMs?: number; pollIntervalMs?: number; limit?: number; signal?: AbortSignal } = {},
+  ): Promise<SkillConfigEventBatch> {
+    const timeoutMs = options.timeoutMs ?? 30_000;
+    const pollIntervalMs = options.pollIntervalMs ?? 50;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+      throw new RangeError("timeoutMs must be one nonnegative safe integer");
+    }
+    if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 1 || pollIntervalMs > 60_000) {
+      throw new RangeError("pollIntervalMs must be a safe integer between 1 and 60000");
+    }
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      options.signal?.throwIfAborted();
+      const batch = this.pollEvents(afterSequence, options.limit ?? 100);
+      if (batch.events.length > 0 || Date.now() >= deadline) {
+        return batch;
+      }
+      await delay(Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())), options.signal);
+    }
+  }
+
+  /**
+   * Start callback delivery for ordered events and return a stop function.
+   * 启动有序事件回调投递并返回停止函数。
+   */
+  watchEvents(
+    handler: (event: SkillConfigEvent) => void,
+    options: {
+      afterSequence?: string;
+      pollIntervalMs?: number;
+      limit?: number;
+      onError?: (error: unknown) => void;
+    } = {},
+  ): () => void {
+    const controller = new AbortController();
+    void (async () => {
+      let cursor = options.afterSequence;
+      try {
+        while (!controller.signal.aborted) {
+          const batch = await this.waitForEvents(cursor, {
+            timeoutMs: options.pollIntervalMs ?? 250,
+            pollIntervalMs: options.pollIntervalMs ?? 50,
+            limit: options.limit,
+            signal: controller.signal,
+          });
+          for (const event of batch.events) {
+            handler(event);
+          }
+          cursor = batch.next_sequence;
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          options.onError?.(error);
+        }
+      }
+    })();
+    return () => controller.abort();
+  }
+}
+
+/**
+ * Reject lossy or non-finite JavaScript numeric configuration inputs.
+ * 拒绝有损或非有限的 JavaScript 数值配置输入。
+ */
+function assertSafeSkillConfigValue(value: SkillConfigValue, key: string): void {
+  if (typeof value !== "number") {
+    return;
+  }
+  if (!Number.isFinite(value)) {
+    throw new TypeError(`configuration '${key}' requires one finite number`);
+  }
+  if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+    throw new RangeError(`configuration '${key}' integer exceeds the JavaScript safe range`);
+  }
+}
+
+/**
+ * Await one abortable timer without retaining a second cancellation path.
+ * 等待单个可中止计时器且不保留第二条取消路径。
+ */
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    if (signal?.aborted) {
+      rejectPromise(signal.reason);
+      return;
+    }
+    // Abort listener removed on both completion paths to keep long-lived watchers bounded.
+    // 在两种完成路径中都移除中止监听器，确保长期监听保持有界。
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      rejectPromise(signal?.reason);
+    };
+    // Poll timer that releases its paired abort listener after normal completion.
+    // 正常完成后释放配对中止监听器的轮询计时器。
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolvePromise();
+    }, milliseconds);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
@@ -1638,7 +1899,9 @@ export function defaultHostOptions(runtimeRoot: string): LuaRuntimeHostOptions {
     dependency_dir_name: "",
     state_dir_name: "",
     database_dir_name: "",
-    skill_config_file_path: null,
+    skill_config_root: null,
+    skill_config_lock_timeout_ms: null,
+    skill_config_watch_debounce_ms: null,
     allow_network_download: true,
     github_base_url: null,
     github_api_base_url: null,

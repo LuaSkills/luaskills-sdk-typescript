@@ -6,13 +6,13 @@ LuaSkills 主仓库：[LuaSkills/luaskills](https://github.com/LuaSkills/luaskil
 
 TypeScript / Node.js SDK，用于通过公共 JSON FFI 接入 LuaSkills 运行时。
 
-`0.5.4` 是当前稳定补丁版本。它保持 `0.5.3` 宿主 API 不变，并把运行时资产默认值切换到 LuaSkills core `v0.5.4`、vldb-controller `v0.2.3` 与 vldb-sqlite `v0.1.6`。
+`0.5.5` 是当前发布版本。它采用严格的技能包级配置契约，并把运行时资产默认值切换到 LuaSkills core `v0.5.5`、vldb-controller `v0.2.3` 与 vldb-sqlite `v0.1.6`。
 
 SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正式 skill root、带权限语义的管理调用、skill config、provider callback、宿主工具 callback 与 runtime 资产安装。宿主在常规集成中不需要手写底层 FFI buffer 或 JSON 包络。
 
 ## 安装
 
-0.5.4 SDK 要求 Node.js 24 LTS 或更高版本。
+0.5.5 SDK 要求 Node.js 24 LTS 或更高版本。
 
 ```bash
 npm install @luaskills/sdk
@@ -39,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_as
 RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all vldb-controller
 ```
 
-目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.5.4`，并允许显式覆盖发布版本。
+目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.5.5`，并允许显式覆盖发布版本。
 
 `install-runtime` 会下载 GitHub Release 资产、校验 `.sha256` 旁路文件、解压原生文件与 Lua runtime 包，并写入：
 
@@ -107,7 +107,7 @@ const pythonInstall = LuaSkillsClient.resolveManagedRuntimeInstall({
 ## 版本对齐
 
 - 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
-- 当前 SDK 默认指向 LuaSkills core 标签 `v0.5.4`。
+- 当前 SDK 默认指向 LuaSkills core 标签 `v0.5.5`。
 - runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
 - SDK 默认 host options 传入 `runtime_root`、两个空的受管根覆盖槽与完整稳定的 `managed_runtime_config`；宿主未显式覆盖时，LuaSkills 会推导固定数据布局。
 - 宿主工具直接放在 `runtime_root/bin`，不再放到 `runtime_root/bin/tools`。
@@ -450,18 +450,54 @@ npx @luaskills/sdk system-install LuaSkills/luaskills-demo-skill --target-root R
 
 ## Skill Config
 
-skill config 是普通的 `skill_id + key` 配置存储面：
+skill config 由每个当前有效技能包自行声明。读取或修改值之前，应先发现声明结构：
 
 ```ts
-client.config.set("my-skill", "api_key", "value");
+const schema = client.config.describe({ skillId: "my-skill" });
+const status = client.config.validate("my-skill");
+
+const write = client.config.set("my-skill", {
+  api_key: "value",
+  retry_count: 3,
+});
+client.config.set("my-skill", "retry_count", 4, {
+  expectedRevision: write.revision,
+});
 client.config.get("my-skill", "api_key");
 client.config.list("my-skill");
-client.config.delete("my-skill", "api_key");
+client.config.delete("my-skill", "api_key", {
+  expectedRevision: write.revision,
+});
+client.config.refresh();
+const events = client.config.pollEvents(undefined, 100);
 ```
 
-配置只有在 Lua skill 主动读取时才会影响行为；它不是运行时强制策略层。
+必须把 `hostOptions.skill_config_root` 设置为绝对用户级目录。LuaSkills 分别把普通技能包与 ROOT 所属技能包配置保存到 `skills/config.json` 和 `system-skills/config.json`。每条原始 `list()` 记录都包含 `store_scope`，因此两个文件中同名技能包的保留记录仍可明确区分。严格版本化文档使用十进制字符串修订号、跨进程伴随锁、原子替换、缓存快照与文件监听重载；旧的无版本文档会被拒绝。
 
-如果宿主不希望用户修改核心能力，应把该能力实现为宿主受控逻辑或可信 system 面，而不是依赖可写 skill config。
+`describe()` 返回参数名、类型、约束、UI 提示、技能包作者提供的说明、枚举选项、默认值与无歧义值状态。`mode: "installed"` 不执行 Lua 即可发现所有物理技能包；默认使用有效技能包模式。人类可读字段由技能包作者自行选择一种语言，建议广泛分发的技能包使用英文，但不强制。写入仅允许当前有效技能包已声明的 key，必须同时满足声明约束与技能包校验器，并以单个技能包批次原子提交。
+
+默认不返回配置值。`includeValues: true` 会返回未遮罩的有效值。SDK 与 LuaSkills 都不负责授权或遮罩；宿主必须对该开关和修改操作执行允许、拒绝、强制覆盖或用户授权策略。Lua 代码只能修改自身技能包，宿主 SDK 调用则有意不加跨包限制。
+
+`expectedRevision` 用于写入与删除的比较并交换。`pollEvents`、`waitForEvents`、`watchEvents` 提供有序的本地写入和外部重载事件；只有完整处理一页后才能保存返回的 `next_sequence`。发现配置缺失时，应展示 `describe()` 结果，并要求用户或已授权 AI 工具提供声明中的参数。
+
+JavaScript 无法区分非安全整数与整数形态的 binary64 浮点数，因此 SDK 会拒绝超出安全整数范围的 number；`1e20` 这类有限浮点值应传入十进制字符串 `"1e20"`，再由核心按已声明的 `float` 校验。
+
+对应 CLI：
+
+```bash
+luaskills config describe my-skill --skill-config-root D:\user-config
+luaskills config validate my-skill
+luaskills config describe my-skill --include-values
+luaskills config describe --installed --root-name ROOT
+luaskills config set my-skill retry_count 3 --expected-revision 7
+luaskills config set-batch my-skill '{"retry_count":4,"mode":"safe"}'
+luaskills config refresh skills
+luaskills config events --after-sequence 12 --limit 100
+```
+
+CLI 默认把 `--skill-config-root` 设为 `<runtime-root>/config`；嵌入 SDK 的宿主仍必须自行选择并传入绝对用户级目录。
+
+技能包卸载后配置仍会保留，显式清理策略由宿主负责。配置只有在 Lua skill 主动读取时才会影响行为；它不是运行时强制策略层。
 
 ## 常见问题
 
@@ -526,7 +562,7 @@ SDK 覆盖公共 JSON FFI 主要入口：
 - list_entries / list_skill_help / render_skill_help_detail
 - prompt_argument_completions / is_skill / skill_name_for_tool
 - call_skill / run_lua
-- skill_config list / get / set / delete
+- skill_config list / describe / validate / get / 批量 set / CAS delete / refresh / 事件轮询
 - SQLite / LanceDB JSON provider callback register / clear
 - 宿主工具 JSON callback register / clear
 - 模型 embed / LLM JSON callback register / clear

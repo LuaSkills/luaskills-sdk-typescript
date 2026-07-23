@@ -1,6 +1,6 @@
 {
   "name": "@luaskills/sdk",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "TypeScript and Node.js SDK for integrating the LuaSkills runtime through the JSON FFI surface.",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,6 +10,7 @@
   },
   "files": [
     "dist",
+    "contracts",
     "examples",
     "scripts/deps/*.ps1",
     "scripts/deps/*.sh",
@@ -23,8 +24,9 @@
   ],
   "scripts": {
     "clean": "node scripts/clean-dist.mjs",
+    "generate:config-contract": "node scripts/generate-skill-config-contract.mjs",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "node scripts/generate-skill-config-contract.mjs --check && tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node tests/run-all.mjs",
     "test:private-url-manifest": "npm run build && node tests/private-url-manifest.mjs",
     "test:runtime-lease-actions": "npm run build && node tests/runtime-lease-actions.mjs",

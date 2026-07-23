@@ -45,5 +45,6 @@ export {
   type SkillOperationProgressPlane,
 } from "./ffi.js";
 export { RuntimeRoots } from "./roots.js";
+export * from "./config-contract.js";
 export * from "./runtime-assets.js";
 export * from "./types.js";
