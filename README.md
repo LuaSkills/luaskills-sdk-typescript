@@ -6,13 +6,13 @@ Main LuaSkills repository: [LuaSkills/luaskills](https://github.com/LuaSkills/lu
 
 TypeScript / Node.js SDK for integrating the LuaSkills runtime through the public JSON FFI surface.
 
-`0.5.5` is the current release line. It adopts the strict package-level skill configuration contract and defaults runtime assets to LuaSkills core `v0.5.5`, vldb-controller `v0.2.3`, and vldb-sqlite `v0.1.6`.
+`0.5.7` is the current release line. It retains the strict package-level skill configuration contract and defaults runtime assets to LuaSkills core `v0.5.7`, vldb-controller `v0.2.3`, and vldb-sqlite `v0.1.6`.
 
 The SDK wraps native library loading, JSON FFI buffers, engine lifecycle, formal skill roots, authority-aware management calls, skill config, provider callbacks, host-tool callbacks, and runtime asset installation. Hosts should not need to hand-write low-level FFI buffers or JSON envelopes for normal integration.
 
 ## Installation
 
-The 0.5.5 SDK requires Node.js 24 LTS or newer.
+The 0.5.7 SDK requires Node.js 24 LTS or newer.
 
 ```bash
 npm install @luaskills/sdk
@@ -39,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_as
 RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all vldb-controller
 ```
 
-Supported targets are `all`, `luaskills`, `lua`, and `vldb`. VLDB presets are `none`, `vldb-controller`, `vldb-direct`, and `host-callback`. The scripts pin LuaSkills to `v0.5.5` by default and accept explicit release-version overrides.
+Supported targets are `all`, `luaskills`, `lua`, and `vldb`. VLDB presets are `none`, `vldb-controller`, `vldb-direct`, and `host-callback`. The scripts pin LuaSkills to `v0.5.7` by default and accept explicit release-version overrides.
 
 `install-runtime` downloads GitHub Release assets, verifies `.sha256` sidecars, extracts native files and Lua runtime packages, and writes:
 
@@ -107,7 +107,7 @@ The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime p
 ## Version Alignment
 
 - Keep the SDK and LuaSkills core on the same current release line whenever possible.
-- The current SDK defaults to LuaSkills core tag `v0.5.5`.
+- The current SDK defaults to LuaSkills core tag `v0.5.7`.
 - Runtime packages and native dependencies still come from the split `LuaSkills/luaskills-packages` and related release assets.
 - SDK default host options pass `runtime_root`, null managed-root override slots, and the complete stable `managed_runtime_config`; LuaSkills derives the fixed data layout until the host explicitly overrides roots or policy.
 - Host tools live directly under `runtime_root/bin`, not `runtime_root/bin/tools`.
