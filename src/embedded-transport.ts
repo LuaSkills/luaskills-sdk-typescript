@@ -26,7 +26,7 @@ export interface EmbeddedTransportConfig {
 
 /** Exact native output descriptor; it is never passed to legacy buffer disposal.
  * 精确原生输出描述符；绝不传给旧版缓冲释放函数。 */
-interface NativeResult {
+export interface NativeResult {
   /** Opaque native address, read only until matching release.
    * 不透明原生地址，匹配释放前只读。 */
   ptr: unknown;
@@ -56,6 +56,93 @@ const CONFIG_FIELDS = Object.freeze(["max_runtimes", "max_result_buffers", "max_
 // Unreleased native ownership must retain its library even when user references disappear.
 // 即使用户引用消失，未释放的原生所有权也必须保留所属动态库。
 const LIVE_TRANSPORTS = new Set<EmbeddedTransport>();
+
+/** Shared exact ABI bindings used by the owner and its borrowed worker threads.
+ * 所有者及其借用工作线程共用的精确 ABI 绑定。 */
+export interface EmbeddedNativeBindings {
+  /** Library reference retained until all native usage ends.
+   * 保留到全部原生使用结束的动态库引用。 */
+  readonly library: koffi.IKoffiLib;
+  /** Allocate ownership from an exact native configuration.
+   * 从精确原生配置分配所有权。 */
+  readonly create: (config: object, output: Array<number | bigint>) => number;
+  /** Request transport closure.
+   * 请求传输关闭。 */
+  readonly close: (identity: bigint) => number;
+  /** Remove drained ownership.
+   * 移除已排空所有权。 */
+  readonly free: (identity: bigint) => number;
+  /** Execute borrowed bytes and publish an exact result descriptor.
+   * 执行借用字节并发布精确结果描述符。 */
+  readonly request: (identity: bigint, input: { ptr: Buffer; len: number }, output: NativeResult) => number;
+  /** Release one exact result belonging to identity.
+   * 释放一个属于 identity 的精确结果。 */
+  readonly resultFree: (identity: bigint, result: NativeResult) => number;
+}
+
+/**
+ * Bind the complete ABI without allocating or assuming ownership of a transport.
+ * 绑定完整 ABI，但不分配或假定传输所有权。
+ * @param libraryPath Exact library path already selected by the owning transport.
+ * 所属传输已经选定的精确动态库路径。
+ * @returns Immutable bindings retaining the library reference.
+ * 保留动态库引用的不可变绑定。
+ */
+export function bindEmbeddedNative(libraryPath: string): EmbeddedNativeBindings {
+  const library = koffi.load(libraryPath);
+  return Object.freeze({
+    library,
+    create: library.func("luaskills_ffi_embedded_transport_new_v1", "int32_t", [koffi.pointer(CONFIG_TYPE), koffi.out(koffi.pointer("uint64_t"))]),
+    close: library.func("luaskills_ffi_embedded_transport_close_v1", "int32_t", ["uint64_t"]),
+    free: library.func("luaskills_ffi_embedded_transport_free_v1", "int32_t", ["uint64_t"]),
+    resultFree: library.func("luaskills_ffi_embedded_result_free_v1", "int32_t", ["uint64_t", RESULT_TYPE]),
+    request: library.func("luaskills_ffi_embedded_request_v1", "int32_t", ["uint64_t", BORROWED_TYPE, koffi.out(koffi.pointer(RESULT_TYPE))]),
+  });
+}
+
+/**
+ * Execute a borrowed frame, copy its complete response and retain every failed native result release.
+ * 执行借用帧、复制完整响应，并保留每个释放失败的原生结果。
+ * @param identity Exact transport identity held alive by the caller.
+ * 由调用方保活的精确传输身份。
+ * @param encoded Immutable complete request bytes.
+ * 不可变完整请求字节。
+ * @param maxResponseBytes Declared maximum response bytes.
+ * 声明的响应字节上限。
+ * @param owners Exact descriptors still owned by this execution context.
+ * 此执行上下文仍拥有的精确描述符。
+ * @param request Bound native request function.
+ * 已绑定原生请求函数。
+ * @param resultFree Bound native result release function.
+ * 已绑定原生结果释放函数。
+ * @returns Independently owned response bytes; errors never authorize business replay.
+ * 独立拥有的响应字节；错误绝不授权业务重放。
+ */
+export function requestEmbeddedNative(identity: bigint, encoded: Buffer, maxResponseBytes: bigint, owners: Map<bigint, Readonly<NativeResult>>, request: EmbeddedNativeBindings["request"], resultFree: EmbeddedNativeBindings["resultFree"]): Buffer {
+  const result: NativeResult = { ptr: null, len: 0n, allocation_id: 0n };
+  let responseBytes: Buffer | null = null;
+  try {
+    const status = request(identity, { ptr: encoded, len: encoded.length }, result);
+    if (status !== EmbeddedNativeStatus.OK) throw new EmbeddedTransportError("luaskills_ffi_embedded_request_v1", status);
+    const length = embeddedUnsignedInteger(result.len, "result length");
+    if (!result.ptr || result.allocation_id === 0 || result.allocation_id === 0n || length === 0n || length > maxResponseBytes || length > BigInt(bufferConstants.MAX_LENGTH)) throw new Error("Invalid embedded result descriptor");
+    // Copy through Uint8Array; Buffer.from(ArrayBuffer) alone would alias the native allocation.
+    // 经 Uint8Array 复制；仅使用 Buffer.from(ArrayBuffer) 会别名原生分配。
+    responseBytes = Buffer.from(new Uint8Array(koffi.view(result.ptr, Number(length))));
+    return responseBytes;
+  } finally {
+    if (result.allocation_id !== 0 && result.allocation_id !== 0n) {
+      const allocation = embeddedUnsignedInteger(result.allocation_id, "allocation_id");
+      const owned = Object.freeze({ ...result });
+      owners.set(allocation, owned);
+      let status: number;
+      try { status = resultFree(identity, owned); }
+      catch (cause) { throw new EmbeddedResultReleaseError(null, responseBytes, cause); }
+      if (status !== EmbeddedNativeStatus.OK) throw new EmbeddedResultReleaseError(status, responseBytes);
+      owners.delete(allocation);
+    }
+  }
+}
 
 /** Native ABI rejection, separate from a delivered structured business error.
  * 原生 ABI 拒绝，独立于已交付的结构化业务错误。 */
@@ -185,6 +272,9 @@ export class EmbeddedTransport {
   // Failed releases retain the exact native descriptor until explicit recovery succeeds.
   // 释放失败保留精确原生描述符，直到显式恢复成功。
   private readonly results = new Map<bigint, Readonly<NativeResult>>();
+  // A driver claim spans startup, queued work, retained results and actual worker exits.
+  // 驱动声明覆盖启动、排队工作、保留结果及实际工作线程退出。
+  private commandDriver: object | null = null;
 
   /**
    * Bind all five exports before allocating ownership with explicit validated budgets.
@@ -208,12 +298,13 @@ export class EmbeddedTransport {
     if (normalized.max_response_bytes > normalized.max_result_bytes) throw new RangeError("max_response_bytes exceeds max_result_bytes");
     this.budgets = Object.freeze(normalized);
     this.libraryPath = resolveLibraryPath(options.libraryPath, options.runtimeRoot);
-    this.library = koffi.load(this.libraryPath);
-    this.nativeNew = this.library.func("luaskills_ffi_embedded_transport_new_v1", "int32_t", [koffi.pointer(CONFIG_TYPE), koffi.out(koffi.pointer("uint64_t"))]);
-    this.nativeClose = this.library.func("luaskills_ffi_embedded_transport_close_v1", "int32_t", ["uint64_t"]);
-    this.nativeFree = this.library.func("luaskills_ffi_embedded_transport_free_v1", "int32_t", ["uint64_t"]);
-    this.nativeResultFree = this.library.func("luaskills_ffi_embedded_result_free_v1", "int32_t", ["uint64_t", RESULT_TYPE]);
-    this.nativeRequest = this.library.func("luaskills_ffi_embedded_request_v1", "int32_t", ["uint64_t", BORROWED_TYPE, koffi.out(koffi.pointer(RESULT_TYPE))]);
+    const native = bindEmbeddedNative(this.libraryPath);
+    this.library = native.library;
+    this.nativeNew = native.create;
+    this.nativeClose = native.close;
+    this.nativeFree = native.free;
+    this.nativeResultFree = native.resultFree;
+    this.nativeRequest = native.request;
     const output: Array<number | bigint> = [0n];
     LIVE_TRANSPORTS.add(this);
     // A thrown binding error may follow publication; retain the library unless native rejection proves no owner.
@@ -252,32 +343,12 @@ export class EmbeddedTransport {
   request(command: InputCommand): EmbeddedJsonValue {
     const encoded = encodeEmbeddedJson({ protocol_version: EMBEDDED_PROTOCOL_VERSION, command }, this.budgets.max_request_bytes);
     const identity = this.requireIdentity();
-    const result: NativeResult = { ptr: null, len: 0n, allocation_id: 0n };
-    let responseBytes: Buffer | null = null;
     this.activeCalls += 1;
     try {
-      this.check("luaskills_ffi_embedded_request_v1", this.nativeRequest(identity, { ptr: encoded, len: encoded.length }, result));
-      const length = embeddedUnsignedInteger(result.len, "result length");
-      if (!result.ptr || result.allocation_id === 0 || result.allocation_id === 0n || length === 0n || length > this.budgets.max_response_bytes || length > BigInt(bufferConstants.MAX_LENGTH)) throw new Error("Invalid embedded result descriptor");
-      // Buffer.from(ArrayBuffer) aliases native memory; copy via Uint8Array before release instead.
-      // Buffer.from(ArrayBuffer) 会别名原生内存；必须经 Uint8Array 在释放前复制。
-      responseBytes = Buffer.from(new Uint8Array(koffi.view(result.ptr, Number(length))));
-      return decodeEmbeddedResponse(responseBytes);
+      const response = requestEmbeddedNative(identity, encoded, this.budgets.max_response_bytes, this.results, this.nativeRequest, this.nativeResultFree);
+      return decodeEmbeddedResponse(response);
     } finally {
-      try {
-        if (result.allocation_id !== 0 && result.allocation_id !== 0n) {
-          const allocation = embeddedUnsignedInteger(result.allocation_id, "allocation_id");
-          const owned = Object.freeze({ ...result });
-          this.results.set(allocation, owned);
-          let status: number;
-          try { status = this.nativeResultFree(identity, owned); }
-          catch (cause) { throw new EmbeddedResultReleaseError(null, responseBytes, cause); }
-          if (status !== EmbeddedNativeStatus.OK) throw new EmbeddedResultReleaseError(status, responseBytes);
-          this.results.delete(allocation);
-        }
-      } finally {
-        this.activeCalls -= 1;
-      }
+      this.activeCalls -= 1;
     }
   }
 
@@ -308,7 +379,7 @@ export class EmbeddedTransport {
    * 实际运行时排空后移除原生所有权；拒绝后传输仍可用于清理。 */
   free(): void {
     const identity = this.requireIdentity();
-    if (this.activeCalls || this.results.size) throw new Error("Embedded transport still owns active calls or results");
+    if (this.activeCalls || this.results.size || this.commandDriver !== null) throw new Error("Embedded transport still owns active calls or results or a command driver");
     this.activeCalls += 1;
     try {
       this.check("luaskills_ffi_embedded_transport_free_v1", this.nativeFree(identity));
@@ -334,5 +405,36 @@ export class EmbeddedTransport {
    */
   private check(functionName: string, status: number): void {
     if (status !== EmbeddedNativeStatus.OK) throw new EmbeddedTransportError(functionName, status);
+  }
+
+  /**
+   * Claim one driver after verifying concurrent frame headroom; raw callers still share native budgets.
+   * 核对并发帧容量后声明一个驱动；直接调用方仍共享原生预算。
+   * @param owner Exact local driver object.
+   * 精确本地驱动对象。
+   * @param slots Work workers plus independently reserved control workers.
+   * 业务工作线程加独立预留控制工作线程。
+   * @returns Exact identity borrowed until releaseDriver succeeds.
+   * 借用到 releaseDriver 成功为止的精确身份。
+   * @internal
+   */
+  claimDriver(owner: object, slots: number): bigint {
+    const identity = this.requireIdentity();
+    if (this.commandDriver !== null) throw new Error("Embedded transport already has a command driver");
+    if (!Number.isSafeInteger(slots) || slots <= 0 || BigInt(slots) > this.budgets.max_result_buffers || BigInt(slots) * this.budgets.max_response_bytes > this.budgets.max_result_bytes) throw new RangeError("Native transport cannot reserve the driver's concurrent response frames");
+    this.commandDriver = owner;
+    return identity;
+  }
+
+  /**
+   * Return the exact driver claim only after its coordinator proves every worker has exited safely.
+   * 仅在协调器证明每个工作线程安全退出后归还精确驱动声明。
+   * @param owner Original local owner; mismatches are rejected.
+   * 原始本地所有者；不匹配时拒绝。
+   * @internal
+   */
+  releaseDriver(owner: object): void {
+    if (this.commandDriver !== owner) throw new Error("Embedded command driver ownership mismatch");
+    this.commandDriver = null;
   }
 }

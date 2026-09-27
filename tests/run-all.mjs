@@ -18,6 +18,8 @@ const testFiles = [
   "embedded-contract.mjs",
   "embedded-json.mjs",
   "embedded-native.mjs",
+  "embedded-driver.mjs",
+  "embedded-worker.mjs",
   "skill-config-native-e2e.mjs",
   "skill-operation-progress-callback.mjs",
   "system-management-raw-call-boundary.mjs",
