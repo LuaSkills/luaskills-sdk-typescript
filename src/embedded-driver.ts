@@ -170,7 +170,7 @@ const CONFIG_FIELDS = ["workThreads", "maxWorkCommands", "maxControlCommands"] a
 
 /** Exact transport ownership category; callback executors cannot consume ordinary command capacity.
  * 精确传输所有权类别；回调执行器不能消耗普通命令容量。 */
-type EmbeddedExecutorOwnership = { readonly kind: "command" } | { readonly kind: "callback"; readonly runtimeId: string };
+type EmbeddedExecutorOwnership = { readonly kind: "command" } | { readonly kind: "callback"; readonly runtimeId: string } | { readonly kind: "scope"; readonly runtimeId: string; readonly pump: object | null };
 
 /** Bounded fixed-worker command driver with independent work/control queues and retained receipts.
  * 具有独立业务／控制队列和保留回执的有界固定工作线程命令驱动。 */
@@ -180,7 +180,7 @@ class EmbeddedCommandExecutor {
   static get live(): readonly EmbeddedCommandExecutor[] { return Object.freeze([...LIVE_EXECUTORS]); }
   // Borrowed owner and frozen local admission limits.
   // 借用所有者及冻结本地入场限制。
-  private readonly transport: EmbeddedTransport;
+  protected readonly transport: EmbeddedTransport;
   private readonly limits: Readonly<EmbeddedCommandDriverConfig>;
   // All actual worker handles, command owners and FIFO queues remain coordinator-owned.
   // 全部实际工作线程句柄、命令所有者和先进先出队列均由协调器拥有。
@@ -214,7 +214,8 @@ class EmbeddedCommandExecutor {
     this.limits = Object.freeze({ ...config });
     const identity = ownership.kind === "command"
       ? transport.claimDriver(this, this.limits.workThreads + EMBEDDED_CONTROL_WORKERS)
-      : transport.claimCallbackPump(ownership.runtimeId, this);
+      : ownership.kind === "callback" ? transport.claimCallbackPump(ownership.runtimeId, this)
+      : transport.claimRuntimeScope(ownership.runtimeId, this, ownership.pump);
     LIVE_EXECUTORS.add(this);
     const workerData: EmbeddedWorkerConfig = { libraryPath: transport.libraryPath, transportId: identity, maxRequestBytes: transport.config.max_request_bytes, maxResponseBytes: transport.config.max_response_bytes };
     try {
@@ -471,7 +472,9 @@ class EmbeddedCommandExecutor {
     }
     if (!this.unsafeExit && this.workers.every((slot) => slot.phase === "exited")) {
       if (this.ownership.kind === "command") this.transport.releaseDriver(this);
-      else this.transport.releaseCallbackPump(this.ownership.runtimeId, this);
+      else if (this.ownership.kind === "callback") this.transport.releaseCallbackPump(this.ownership.runtimeId, this);
+      // Scope ownership outlives the executor; its coordinator separately proves runtime removal.
+      // 作用域所有权超越执行器存活；其协调器单独证明运行时已移除。
       LIVE_EXECUTORS.delete(this);
       this.closed = true;
       this.stopped.resolve();
@@ -482,6 +485,10 @@ class EmbeddedCommandExecutor {
 /** Public bounded command driver; its control capacity is independent from every callback pump.
  * 公开有界命令驱动；其控制容量独立于每个回调泵。 */
 export class EmbeddedCommandDriver extends EmbeddedCommandExecutor {
+  /** Borrow the exact native transport for a lifecycle scope; no new transport is created.
+   * 为生命周期作用域借用精确原生传输；不创建新传输。
+   * @internal */
+  get borrowedTransport(): EmbeddedTransport { return this.transport; }
   /** Discover only ordinary driver owners; callback pumps expose their own lifetime diagnostics.
    * 仅发现普通驱动所有者；回调泵公开自身生命周期诊断。 */
   static override get live(): readonly EmbeddedCommandDriver[] { return Object.freeze(super.live.filter((owner) => owner instanceof EmbeddedCommandDriver)); }
@@ -528,5 +535,33 @@ export class EmbeddedCallbackExecutor extends EmbeddedCommandExecutor {
   constructor(transport: EmbeddedTransport, runtimeId: string, maxCommands: number) {
     if (!Number.isSafeInteger(maxCommands) || maxCommands <= 0) throw new RangeError("Callback executor command capacity must be a positive safe integer");
     super(transport, { workThreads: 0, maxWorkCommands: 0, maxControlCommands: maxCommands }, { kind: "callback", runtimeId });
+  }
+}
+
+/** Independent lifecycle executor retaining its scope claim beyond worker shutdown.
+ * 独立生命周期执行器，在线程关闭后仍保留作用域声明。
+ * @internal */
+export class EmbeddedScopeExecutor extends EmbeddedCommandExecutor {
+  /**
+   * Reserve one control worker for runtimeId, adopting pump by exact identity.
+   * 为 runtimeId 预留一个控制线程，按精确身份接管 pump。
+   * @param transport Borrowed shared transport.
+   * 借用的共享传输。
+   * @param runtimeId Exact runtime being owned.
+   * 正被拥有的精确运行时。
+   * @param pump Exact optional callback executor.
+   * 精确可选回调执行器。
+   */
+  constructor(transport: EmbeddedTransport, private readonly runtimeId: string, pump: object | null) {
+    super(transport, { workThreads: 0, maxWorkCommands: 0, maxControlCommands: 1 }, { kind: "scope", runtimeId, pump });
+  }
+
+  /** Release the claim only after actual worker exit; the scope must separately prove native release or unused startup.
+   * 仅在实际线程退出后释放声明；作用域必须另行证明原生释放或未使用的启动。
+   * @returns Normally after the exact ownership claim is removed.
+   * 精确所有权声明移除后正常返回。 */
+  releaseOwnership(): void {
+    if (!this.status.closed) throw new Error("Runtime scope worker has not exited");
+    this.transport.releaseRuntimeScope(this.runtimeId, this);
   }
 }

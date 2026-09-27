@@ -22,6 +22,7 @@ const testFiles = [
   "embedded-worker.mjs",
   "embedded-pump.mjs",
   "embedded-client.mjs",
+  "embedded-scope.mjs",
   "skill-config-native-e2e.mjs",
   "skill-operation-progress-callback.mjs",
   "system-management-raw-call-boundary.mjs",

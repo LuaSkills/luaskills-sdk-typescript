@@ -167,7 +167,10 @@ export class EmbeddedRuntime {
   /** Request exact slot removal; return its receipt and preserve native premature-release rejection.
    * 请求精确槽移除；返回其回执，并保留原生过早释放拒绝。
    */
-  free(): EmbeddedPending<wire.OutputRuntimeReceipt> { return this.#client.root({ type: "runtime_free", runtime_id: this.#runtimeId }, "control"); }
+  free(): EmbeddedPending<wire.OutputRuntimeReceipt> {
+    this.#client.driver.borrowedTransport.checkUnmanagedRuntime(this.#runtimeId);
+    return this.#client.root({ type: "runtime_free", runtime_id: this.#runtimeId }, "control");
+  }
   /**
    * Register a plugin's aggregate budgets across all its pool generations.
    * 注册插件跨全部池代次的聚合预算。

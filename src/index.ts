@@ -56,5 +56,6 @@ export { EmbeddedCommandDriver, EmbeddedCommand, type EmbeddedCommandDriverConfi
 export { HostCapability, HostCallbackContext, type EmbeddedHostHandler } from "./embedded-callbacks.js";
 export { EmbeddedCallbackPump, type CallbackPumpConfig } from "./embedded-pump.js";
 export { EmbeddedPending, EmbeddedClient, EmbeddedRuntime, EmbeddedPlugin, EmbeddedPool, EmbeddedSession, EmbeddedSessionOpen, EmbeddedOperation } from "./embedded-client.js";
+export { EmbeddedRuntimeScope } from "./embedded-scope.js";
 export * from "./runtime-assets.js";
 export * from "./types.js";

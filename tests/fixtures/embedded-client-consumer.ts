@@ -1,4 +1,4 @@
-import { EmbeddedClient, EmbeddedCommandDriver, EmbeddedRuntime, EmbeddedPending, EmbeddedOperation, createEngineOptions, type embeddedContract } from "../../dist/index.js";
+import { EmbeddedClient, EmbeddedCommandDriver, EmbeddedRuntime, EmbeddedRuntimeScope, EmbeddedPending, EmbeddedOperation, createEngineOptions, type embeddedContract } from "../../dist/index.js";
 
 /**
  * Compile a public consumer against distributed declarations; this fixture is never executed.
@@ -21,6 +21,10 @@ export async function typedConsumer(driver: EmbeddedCommandDriver, config: embed
   const reservation: EmbeddedPending<EmbeddedRuntime> = client.reserve();
   const runtime = await reservation.result();
   reservation.forget();
+  // Async disposal must be available from the distributed public declarations on the minimum supported Node version.
+  // 最低支持 Node 版本必须能从分发公开声明使用异步释放。
+  await using scope: EmbeddedRuntimeScope = new EmbeddedRuntimeScope(runtime, { pollIntervalMs: 2 });
+  await scope.ready({ signal: AbortSignal.timeout(100) });
   await runtime.initialize(createEngineOptions({ runtimeRoot: ".", hostOptions: { capabilities: { enable_skill_management_bridge: false } } }), config).result();
   // @ts-expect-error Legacy JSON engine options must not accept arbitrary cache values.
   // 旧 JSON 引擎选项不能接受任意缓存值。

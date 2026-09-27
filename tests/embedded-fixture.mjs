@@ -34,19 +34,19 @@ export async function poll(read, complete) {
  * 拥有一个可信模块夹具直到实际运行时清理，即使测试断言失败也如此。
  * @param {Function} action Test body receiving the known runtime and package identity.
  * 接收已知运行时和包身份的测试主体。
- * @param {object} options Optional explicit driver configuration for native initialization through workers.
- * 可选显式驱动配置，用于通过工作线程进行原生初始化。
+ * @param {object} options Optional explicit driver and transport budgets for native initialization and ownership tests.
+ * 可选显式驱动及传输预算，用于原生初始化及所有权测试。
  * @returns {Promise<void>} Resolves only after native runtime removal and transport release.
  * 仅在原生运行时移除及传输释放后完成。
  */
-export async function withRuntime(action, { driverConfig = null } = {}) {
+export async function withRuntime(action, { driverConfig = null, transportConfig = budgets } = {}) {
   const root = mkdtempSync(join(tmpdir(), "luaskills-embedded-ts-"));
   const pluginId = "typescript-embedded-test";
   const systemRoot = join(root, "system_lua_lib");
   const packageRoot = join(systemRoot, pluginId);
   mkdirSync(packageRoot, { recursive: true });
   writeFileSync(join(packageRoot, "dependencies.yaml"), "{}\n");
-  const transport = new EmbeddedTransport(budgets);
+  const transport = new EmbeddedTransport(transportConfig);
   let runtimeId = null;
   let driver = null;
   try {
@@ -63,7 +63,8 @@ export async function withRuntime(action, { driverConfig = null } = {}) {
     };
     runtimeId = (await initialize({ type: "runtime_reserve" })).runtime_id;
     const limits = { max_registered_plugins: 4, max_registered_pools: 4, max_sessions: 4, max_registered_capabilities: 4, max_resident_vms: 2, max_running_calls: 2, max_queued_calls: 4, max_queued_bytes: 4096, max_operations: 16, max_effect_records_per_operation: 8, max_effect_bytes_per_operation: 8192, max_host_requests: 4, max_host_request_bytes: 8192, max_value_bytes: 1024 };
-    await initialize({ type: "runtime_initialize", runtime_id: runtimeId, engine_options: createEngineOptions({ runtimeRoot: root, hostOptions: { system_lua_lib_dir: systemRoot, allow_network_download: false } }), runtime_config: limits });
+    const engineOptions = createEngineOptions({ runtimeRoot: root, hostOptions: { system_lua_lib_dir: systemRoot, allow_network_download: false } });
+    await initialize({ type: "runtime_initialize", runtime_id: runtimeId, engine_options: engineOptions, runtime_config: limits });
     const status = transport.request({ type: "runtime_status", runtime_id: runtimeId });
     assert.equal(status.initialization, "ready", JSON.stringify(status));
     // Commands bind one exact runtime identity; no name-based lookup or fallback is involved.
@@ -80,7 +81,7 @@ export async function withRuntime(action, { driverConfig = null } = {}) {
     // 入场仅返回操作身份，绝不推断业务结果成功。
     const submit = (poolId, argumentsValue) => command({ type: "call_submit", timeout_ms: 10000, call: { pool_id: poolId, export: "call", arguments: argumentsValue, context: { request_context: null, client_budget: null, tool_config: null } } }).operation_id;
     const terminal = (operationId) => poll(() => command({ type: "operation_status", operation_id: operationId }), (snapshot) => ["succeeded", "failed", "cancelled"].includes(snapshot.phase));
-    await action({ transport, driver, runtimeId, runtimeConfig: limits, pluginId, pluginConfig, moduleDefinition, poolPolicy, command, pool, submit, terminal });
+    await action({ transport, driver, runtimeId, engineOptions, runtimeConfig: limits, pluginId, pluginConfig, moduleDefinition, poolPolicy, command, pool, submit, terminal });
   } finally {
     if (driver !== null) { await driver.releaseResults(); await driver.close(); }
     transport.releaseResults();

@@ -164,6 +164,33 @@ export class EmbeddedCallbackPump {
   /** Exact runtime identity borrowed by this pump.
    * 此泵借用的精确运行时身份。 */
   get runtimeId(): string { return this.#runtimeId; }
+
+  /**
+   * Bind an owning scope to this exact transport/runtime pair without issuing a native command.
+   * 将拥有型作用域绑定到此精确传输／运行时组合，不发出原生命令。
+   * @param transport Scope's borrowed transport identity.
+   * 作用域借用的传输身份。
+   * @param runtimeId Exact runtime being adopted.
+   * 正被接管的精确运行时。
+   * @returns The internal callback executor whose claim the scope must capture.
+   * 作用域必须捕获其声明的内部回调执行器。
+   * @internal
+   */
+  scopeOwner(transport: EmbeddedTransport, runtimeId: string): object {
+    if (transport !== this.#transport || runtimeId !== this.#runtimeId || this.#closed) throw new Error("Runtime scope requires its exact live callback pump");
+    return this.#executor;
+  }
+
+  /** Report completed but unresolved delivery evidence, never a command still executing normally.
+   * 报告已完成但未解决的交付证据，绝不将正常执行中的命令误报。
+   * @internal */
+  get recoveryRequired(): boolean {
+    return this.#needsRelease
+      || (this.#extraction !== null && this.#extraction.receipt !== null && this.#extraction.receipt.done)
+      || [...this.#publications].some((entry) => entry.attempted && entry.receipt !== null && entry.receipt.done)
+      || [...this.#registrations.values()].some((entry) => entry.mutation !== null && entry.mutation.receipt !== null && entry.mutation.receipt.done)
+      || [...this.#requests.values()].some((entry) => entry.acknowledgementFailed);
+  }
   /** Frozen SDK ownership diagnostics; no native terminal state is inferred.
    * 冻结 SDK 所有权诊断；不推断原生终态。 */
   get status(): Readonly<{ ready: boolean; closing: boolean; closed: boolean; registrationIds: readonly string[]; requestIds: readonly string[]; pendingAcknowledgements: readonly string[]; pendingCommands: number; pendingExtraction: boolean; needsResultRelease: boolean; failure: string | null }> {

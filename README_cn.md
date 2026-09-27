@@ -36,7 +36,13 @@ JavaScript 处理器在拥有泵的 Node 事件循环运行；同步处理器必
 
 响应异常导致的注册、请求提取、注销和元数据遗忘都保留原始命令回执，不自动重放。恢复已提取批次时先安装精确请求，再将此前尚未启动的各处理器执行一次，不重复原生提取；`status.pendingExtraction` 和 `status.needsResultRelease` 公布尚未确认的提取及缓冲恢复所有权。未确认的宿主完成结果继续占用处理器名额，故障会停止新的回调入场。`retryAcknowledgements()` 显式回收失败缓冲，并用原始回执或精确操作副作用记录核对实际完成；仅在核心证明请求仍待确认时重新交付原冻结确认，不重新执行处理器。not_found 或 already_completed 本身不作为已完成证据。缺少交付证据时保留所有权；工作线程终止性基础设施故障会拒绝关闭观察，不宣称成功或释放缺少证明的声明。持久崩溃恢复日志仍属于后续实施，不把这些内存证据当作持久恢复。
 
-`EmbeddedClient(driver)` 提供运行时、插件、池、固定会话和操作的类型句柄。`client.reserve()` 立即返回 `EmbeddedPending<EmbeddedRuntime>`；原生变更保留原始回执，直到显式 `forget()`。`pending.result({ signal })` 观察交付，`pending.deliveredResult()` 从复制证据恢复释放失败前的交付，`pending.map()` 只为同一回执建立本地视图。投影失败或观察取消后，原始证据仍保留在驱动器中。这些句柄借用驱动器，不自动完成原生生命周期清理；拥有型运行时作用域仍在实施。
+`EmbeddedClient(driver)` 提供运行时、插件、池、固定会话和操作的类型句柄。`client.reserve()` 立即返回 `EmbeddedPending<EmbeddedRuntime>`；原生变更保留原始回执，直到显式 `forget()`。`pending.result({ signal })` 观察交付，`pending.deliveredResult()` 从复制证据恢复释放失败前的交付，`pending.map()` 只为同一回执建立本地视图。投影失败或观察取消后，原始证据仍保留在驱动器中。这些句柄借用驱动器；使用 `EmbeddedRuntimeScope` 接管并协调原生生命周期清理。
+
+`new EmbeddedRuntimeScope(runtime, { pump, pollIntervalMs })` 接管一个已知运行时及其已有回调泵；无泵时可在初始化前接管预留槽。构造只分配独立控制线程和所有权，不初始化或关闭运行时；`ready()` 只证明该线程就绪。已有泵必须精确匹配传输及运行时，不能遗漏；接管后禁止新建泵、重复作用域和独立类型化 `runtime.free()`。作用域、泵和普通驱动的最坏响应帧统一计入传输预算，关闭不依赖普通驱动回执余量，也不关闭共享驱动、根传输或其他运行时。低层原始命令仍要求宿主自行遵守所有权顺序。
+
+`scope.close({ signal })` 依次关闭原生入场、等待真实宿主回调及泵退出、轮询核心排空、移除精确槽并汇合控制线程。即使信号已中止，关闭仍被启动并强保留；取消只结束本次观察。也可使用 `await using scope = new EmbeddedRuntimeScope(runtime)`，离开作用域时等待相同关闭流程。长时间未返回的宿主处理器会延长真实排空，不能用观察超时假装已释放。`EmbeddedRuntimeScope.live` 与 `scope.status` 保留可发现的所有权及检查点。
+
+失败后的普通 `close()` 观察原尝试；`retryClose()` 显式恢复原始交付、保留缓冲或核心已证明未变更的根容量拒绝。复制的移除成功先推进检查点，即使后续缓冲释放失败也不会再次移除槽。回调泵需要证据恢复时明确报告，重试先恢复原泵；不重新执行处理器。无法证明释放时保留作用域声明；仅未发出原生命令的启动失败可在线程实际退出后撤销声明。运行时槽释放会移除其操作记录，宿主需要长期保存的副作用证据应在关闭前持久化；完整持久恢复仍待整体方案后续实施。
 
 `runtime.initialize(engineOptions, runtimeConfig)` 是单次构造尝试；必须查询 `runtime.status()` 区分预留、初始化中、就绪、失败及故障，初始化回执本身不代表成功。`runtime.registerPlugin()` 设置聚合预算；`runtime.registerPool()` 保留不可变定义、显式权限及执行修订。`pool.submit()` 和 `session.submit()` 返回操作身份回执，不是 Lua 完成结果；`pool.openSession()` 同时返回会话及独立可查询的初始化操作。句柄身份不可重定向；已知身份构造器不探测或推断原生存在性。
 

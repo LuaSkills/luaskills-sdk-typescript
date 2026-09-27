@@ -279,6 +279,9 @@ export class EmbeddedTransport {
   // Callback executors have independent frames and one exact owner per native runtime identity.
   // 回调执行器拥有独立帧，且每个原生运行时身份仅有一个精确所有者。
   private readonly callbackPumps = new Map<string, object>();
+  // Scope claims survive worker failure until proven startup abort or actual runtime release.
+  // 作用域声明跨越工作线程失败保留，直到启动中止获证或运行时实际释放。
+  private readonly runtimeScopes = new Map<string, object>();
   private commandSlots = 0;
 
   /**
@@ -384,7 +387,7 @@ export class EmbeddedTransport {
    * 实际运行时排空后移除原生所有权；拒绝后传输仍可用于清理。 */
   free(): void {
     const identity = this.requireIdentity();
-    if (this.activeCalls || this.results.size || this.commandDriver !== null || this.callbackPumps.size) throw new Error("Embedded transport still owns active calls or results or a command driver or callback pump");
+    if (this.activeCalls || this.results.size || this.commandDriver !== null || this.callbackPumps.size || this.runtimeScopes.size) throw new Error("Embedded transport still owns active calls or results or a command driver or callback pump or runtime scope");
     this.activeCalls += 1;
     try {
       this.check("luaskills_ffi_embedded_transport_free_v1", this.nativeFree(identity));
@@ -427,7 +430,7 @@ export class EmbeddedTransport {
     const identity = this.requireIdentity();
     if (this.commandDriver !== null) throw new Error("Embedded transport already has a command driver");
     if (!Number.isSafeInteger(slots) || slots <= 0) throw new RangeError("Driver slots must be a positive safe integer");
-    this.checkWorkerFrames(BigInt(slots) + BigInt(this.callbackPumps.size) * BigInt(EMBEDDED_CONTROL_WORKERS));
+    this.checkWorkerFrames(BigInt(slots) + BigInt(this.callbackPumps.size + this.runtimeScopes.size) * BigInt(EMBEDDED_CONTROL_WORKERS));
     this.commandDriver = owner;
     this.commandSlots = slots;
     return identity;
@@ -461,8 +464,9 @@ export class EmbeddedTransport {
     const identity = this.requireIdentity();
     if (typeof runtimeId !== "string" || runtimeId.length === 0) throw new TypeError("Callback pump requires an exact runtime identity");
     if (this.callbackPumps.has(runtimeId)) throw new Error("Embedded runtime already has a callback pump");
+    if (this.runtimeScopes.has(runtimeId)) throw new Error("Create the callback pump before adopting the runtime scope");
     if (BigInt(this.callbackPumps.size) >= this.budgets.max_runtimes) throw new RangeError("Callback pump ownership exceeds runtime capacity");
-    this.checkWorkerFrames(BigInt(this.commandSlots) + (BigInt(this.callbackPumps.size) + 1n) * BigInt(EMBEDDED_CONTROL_WORKERS));
+    this.checkWorkerFrames(BigInt(this.commandSlots) + (BigInt(this.callbackPumps.size + this.runtimeScopes.size) + 1n) * BigInt(EMBEDDED_CONTROL_WORKERS));
     this.callbackPumps.set(runtimeId, owner);
     return identity;
   }
@@ -489,5 +493,52 @@ export class EmbeddedTransport {
    */
   private checkWorkerFrames(slots: bigint): void {
     if (slots > this.budgets.max_result_buffers || slots * this.budgets.max_response_bytes > this.budgets.max_result_bytes) throw new RangeError("Native transport cannot reserve concurrent response frames for SDK workers");
+  }
+
+  /**
+   * Claim one independent lifecycle frame and the exact existing callback executor, if present.
+   * 声明一个独立生命周期帧及存在时的精确回调执行器。
+   * @param runtimeId Exact native runtime identity; no native command is issued.
+   * 精确原生运行时身份；不发出原生命令。
+   * @param owner Strongly retained lifecycle executor identity.
+   * 强引用保留的生命周期执行器身份。
+   * @param pump Exact adopted callback executor, or null when none exists.
+   * 接管的精确回调执行器，不存在时为 null。
+   * @returns Existing native transport identity after bounded ownership admission.
+   * 有界所有权入场后的现有原生传输身份。
+   * @internal
+   */
+  claimRuntimeScope(runtimeId: string, owner: object, pump: object | null): bigint {
+    const identity = this.requireIdentity();
+    if (typeof runtimeId !== "string" || runtimeId.length === 0) throw new TypeError("Runtime scope requires an exact runtime identity");
+    if (this.runtimeScopes.has(runtimeId)) throw new Error("Embedded runtime already has a lifecycle scope");
+    if ((this.callbackPumps.get(runtimeId) ?? null) !== pump) throw new Error("Runtime scope must adopt its exact existing callback pump");
+    if (BigInt(this.runtimeScopes.size) >= this.budgets.max_runtimes) throw new RangeError("Runtime scope ownership exceeds runtime capacity");
+    this.checkWorkerFrames(BigInt(this.commandSlots) + (BigInt(this.callbackPumps.size + this.runtimeScopes.size) + 1n) * BigInt(EMBEDDED_CONTROL_WORKERS));
+    this.runtimeScopes.set(runtimeId, owner);
+    return identity;
+  }
+
+  /**
+   * Release an exact scope claim after its coordinator proves safe release and actual worker exit.
+   * 协调器证明安全释放及实际线程退出后，释放精确作用域声明。
+   * @param runtimeId Exact owned runtime identity.
+   * 精确拥有的运行时身份。
+   * @param owner Original lifecycle executor; mismatches are rejected.
+   * 原始生命周期执行器；不匹配时拒绝。
+   * @returns Normally only after removing that claim.
+   * 仅在移除该声明后正常返回。
+   * @internal
+   */
+  releaseRuntimeScope(runtimeId: string, owner: object): void {
+    if (this.runtimeScopes.get(runtimeId) !== owner) throw new Error("Embedded runtime scope ownership mismatch");
+    this.runtimeScopes.delete(runtimeId);
+  }
+
+  /** Reject independent typed free while a scope owns runtimeId; return only for unmanaged identities.
+   * 作用域拥有 runtimeId 时拒绝独立类型化释放；仅对未接管身份返回。
+   * @internal */
+  checkUnmanagedRuntime(runtimeId: string): void {
+    if (this.runtimeScopes.has(runtimeId)) throw new Error("Runtime release is owned by its lifecycle scope");
   }
 }
