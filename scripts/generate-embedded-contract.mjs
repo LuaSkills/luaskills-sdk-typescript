@@ -190,10 +190,16 @@ function expression(schema, names) {
  */
 export function generate(contract, bytes) {
   if (contract.contract_version !== 1 || contract.generator.schema_draft !== "2020-12") throw new Error("Unsupported contract version or draft");
+  // Required metadata must be usable before native ownership or memory copying is allowed.
+  // 在允许原生所有权或内存复制之前，必需元数据必须可用。
+  const compatibility = contract.compatibility;
+  if (compatibility.description_version !== 1 || !Number.isSafeInteger(compatibility.max_description_bytes) || compatibility.max_description_bytes <= 0) throw new Error("Unsupported compatibility descriptor metadata");
+  const capabilities = compatibility.required_capabilities;
+  if (!Array.isArray(capabilities) || !capabilities.length || capabilities.some((name) => typeof name !== "string" || !name) || new Set(capabilities).size !== capabilities.length) throw new Error("Invalid compatibility capability inventory");
   for (const [commands, responses, excluded] of [[contract.commands, contract.root_responses, "runtime"], [contract.runtime_commands, contract.runtime_responses, null]]) {
     if (!Array.isArray(commands) || commands.some((name) => typeof name !== "string") || new Set(commands).size !== commands.length || !isDeepStrictEqual([...commands.filter((name) => name !== excluded)].sort(), Object.keys(responses).sort())) throw new Error("Command response coverage mismatch");
   }
-  const outputRoots = [["OutputErrorResponse", contract.error_response]];
+  const outputRoots = [["OutputErrorResponse", contract.error_response], ["OutputCoreDescription", contract.core_description]];
   for (const [prefix, responses] of [["OutputRoot", contract.root_responses], ["OutputRuntime", contract.runtime_responses]]) {
     for (const [name, schema] of Object.entries(responses)) outputRoots.push([prefix + identifier(name) + "Response", schema]);
   }
@@ -216,7 +222,10 @@ export function generate(contract, bytes) {
     "/** Exact integer inputs use bigint outside the safe number range.\n * 超出安全 number 范围的精确整数输入使用 bigint。 */\nexport type EmbeddedInteger = number | bigint;\n",
     "/** Recursive JSON values with lossless integers and explicit float intent.\n * 具有无损整数和显式浮点意图的递归 JSON 值。 */\nexport type EmbeddedJsonValue = null | boolean | string | number | bigint | EmbeddedFloat | EmbeddedJsonValue[] | { [key: string]: EmbeddedJsonValue };\n"];
   const owners = new Set(["EmbeddedInteger", "EmbeddedJsonValue", "EmbeddedNativeStatus", "EmbeddedRootResponseMap", "EmbeddedRuntimeResponseMap"]);
-  for (const [name, value] of Object.entries({ EMBEDDED_PROTOCOL_VERSION: contract.protocol_version, EMBEDDED_CONTRACT_VERSION: contract.contract_version, EMBEDDED_CORE_VERSION: contract.core_version, EMBEDDED_CONTRACT_SHA256: createHash("sha256").update(bytes).digest("hex"), EMBEDDED_ROOT_COMMANDS: contract.commands, EMBEDDED_RUNTIME_COMMANDS: contract.runtime_commands })) {
+  for (const [name, value] of Object.entries({ EMBEDDED_PROTOCOL_VERSION: contract.protocol_version, EMBEDDED_CONTRACT_VERSION: contract.contract_version, EMBEDDED_CORE_VERSION: contract.core_version, EMBEDDED_CONTRACT_SHA256: createHash("sha256").update(bytes).digest("hex"), EMBEDDED_ROOT_COMMANDS: contract.commands, EMBEDDED_RUNTIME_COMMANDS: contract.runtime_commands,
+    EMBEDDED_DESCRIPTION_VERSION: contract.compatibility.description_version,
+    EMBEDDED_DESCRIPTION_MAX_BYTES: contract.compatibility.max_description_bytes,
+    EMBEDDED_REQUIRED_CAPABILITIES: contract.compatibility.required_capabilities })) {
     owners.add(name);
     const literal = JSON.stringify(value) + " as const";
     lines.push(documentation({}, name) + `export const ${name} = ${Array.isArray(value) ? `Object.freeze(${literal})` : literal};\n`);

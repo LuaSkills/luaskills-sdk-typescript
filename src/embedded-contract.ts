@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "03674807fcd4ea0249915fd210eb5caeaa31e9ec6471feff1e3f39977876e9a1" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "dce1e3c949f3c45042e3b3d75c452f28bb8694e5e004b55082e58b1be28e8a7f" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -50,6 +50,24 @@ export const EMBEDDED_ROOT_COMMANDS = Object.freeze(["describe","runtime_reserve
  * EMBEDDED_RUNTIME_COMMANDS 的生成线形状。
  */
 export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
+
+/**
+ * Generated wire shape for EMBEDDED_DESCRIPTION_VERSION.
+ * EMBEDDED_DESCRIPTION_VERSION 的生成线形状。
+ */
+export const EMBEDDED_DESCRIPTION_VERSION = 1 as const;
+
+/**
+ * Generated wire shape for EMBEDDED_DESCRIPTION_MAX_BYTES.
+ * EMBEDDED_DESCRIPTION_MAX_BYTES 的生成线形状。
+ */
+export const EMBEDDED_DESCRIPTION_MAX_BYTES = 16384 as const;
+
+/**
+ * Generated wire shape for EMBEDDED_REQUIRED_CAPABILITIES.
+ * EMBEDDED_REQUIRED_CAPABILITIES 的生成线形状。
+ */
+export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","strict_json_v1"] as const);
 
 /**
  * Generated wire shape for EmbeddedNativeStatus.
@@ -1717,6 +1735,78 @@ export type OutputCapabilityScope = ("invocation" | "session");
 export type OutputEffectState = ("not_started" | "not_applicable" | "committed" | "rolled_back" | "unknown");
 
 /**
+ * Selected package and compiler input identities; binary authentication remains the release artifact's job.
+ * 选定包及编译器输入身份；二进制认证仍由发布产物负责。
+ */
+export type OutputEmbeddedBuildIdentity = ({
+/**
+ * Sorted Cargo feature environment suffixes; they are not reverse-mapped into guessed feature names.
+ * 排序后 Cargo 功能环境后缀；不反向映射为猜测功能名。
+ */
+"cargo_features": Array<string>;
+/**
+ * Exact bundled embedded contract identity, independently checked by SDKs.
+ * 精确包内嵌入式契约身份，由 SDK 独立检查。
+ */
+"contract_sha256": string;
+/**
+ * Cargo's debug-information setting, independent of optimization.
+ * Cargo 调试信息设置，独立于优化。
+ */
+"debug_info": string;
+/**
+ * SHA-256 of the exact machine-readable selected-input report emitted by build.rs.
+ * build.rs 输出的精确机器可读选定输入报告的 SHA-256。
+ */
+"inputs_sha256": string;
+/**
+ * Actual Cargo optimization setting, not an inferred profile label.
+ * 实际 Cargo 优化设置，不推断配置名称。
+ */
+"opt_level": string;
+/**
+ * Bundled package lockfile identity; a consuming Rust workspace may resolve a different dependency graph.
+ * 包内锁文件身份；消费它的 Rust 工作区可能解析出不同依赖图。
+ */
+"package_lock_sha256": string;
+/**
+ * Cargo's target pointer width, preserved as its exact textual value.
+ * Cargo 目标指针位宽，保留其精确文本值。
+ */
+"pointer_width": string;
+/**
+ * The selected rustc executable's verbose version output.
+ * 所选 rustc 可执行文件的详细版本输出。
+ */
+"rustc": string;
+/**
+ * SHA-256 of Cargo's exact encoded additional compiler flags.
+ * Cargo 精确编码额外编译参数的 SHA-256。
+ */
+"rustflags_sha256": string;
+/**
+ * SHA-256 of sorted package-relative input paths and their exact content hashes.
+ * 排序后包相对输入路径及其精确内容摘要的 SHA-256。
+ */
+"source_sha256": string;
+/**
+ * Cargo's target triple for this build.
+ * 此构建的 Cargo 目标三元组。
+ */
+"target": string;
+/**
+ * Cargo's target architecture identity.
+ * Cargo 目标架构身份。
+ */
+"target_arch": string;
+/**
+ * Cargo's target operating-system identity.
+ * Cargo 目标操作系统身份。
+ */
+"target_os": string;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
  * Structured error; `code` is stable and `message` is an English diagnostic.
  * 结构化错误；`code` 稳定，`message` 为英文诊断信息。
  */
@@ -1923,6 +2013,12 @@ export type OutputEmbeddedSessionSnapshot = ({
  * 独立于原生传输失败的唯一合法业务错误判别。
  */
 export type OutputErrorStatus = ("error");
+
+/**
+ * Declared backend; unavailable variants are rejected instead of downgraded.
+ * 声明的执行后端；不可用的取值直接拒绝，不降级。
+ */
+export type OutputExecutionBackend = ("in_process" | "worker_process");
 
 /**
  * Actual handler lifecycle, separate from its reported business effect.
@@ -2340,6 +2436,58 @@ export type OutputErrorResponse = ({
  * 精确业务错误判别。
  */
 "status": OutputErrorStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Immutable description of the exact linked core, usable without a transport or runtime.
+ * 精确链接核心的不可变描述，无需传输或运行时即可使用。
+ */
+export type OutputCoreDescription = ({
+/**
+ * Exact independent embedded ABI structure version.
+ * 精确独立嵌入式 ABI 结构版本。
+ */
+"abi_structure_version": number;
+/**
+ * Build input evidence; release manifests bind it to commits and signed artifact checksums separately.
+ * 构建输入证据；发布清单另将其关联到提交及签名产物摘要。
+ */
+"build": OutputEmbeddedBuildIdentity;
+/**
+ * Implemented semantic features; a name does not grant host permissions.
+ * 已实现语义功能；名称不授予宿主权限。
+ */
+"capabilities": Array<string>;
+/**
+ * Root command names shared with the exhaustive dispatcher.
+ * 与穷尽分发器共享的根命令名称。
+ */
+"commands": Array<string>;
+/**
+ * Cargo package version of this exact core.
+ * 此精确核心的 Cargo 包版本。
+ */
+"core_version": string;
+/**
+ * Version of this independent descriptor format.
+ * 此独立描述格式的版本。
+ */
+"description_version": number;
+/**
+ * Actually implemented execution backends, excluding reserved unsupported variants.
+ * 实际已实现执行后端，不包含预留且不支持的取值。
+ */
+"execution_backends": Array<OutputExecutionBackend>;
+/**
+ * Exact embedded JSON protocol version.
+ * 精确嵌入式 JSON 协议版本。
+ */
+"protocol_version": number;
+/**
+ * Nested command names shared with the exhaustive dispatcher.
+ * 与穷尽分发器共享的嵌套命令名称。
+ */
+"runtime_commands": Array<string>;
 } & Record<string, EmbeddedJsonValue>);
 
 /**
