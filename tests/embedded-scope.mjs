@@ -286,3 +286,57 @@ test("scope reports callback recovery demand and resumes exact registration evid
     });
   } finally { EmbeddedCallbackExecutor.prototype.submit = original; }
 });
+
+test("scope checkpoints require exact identities and typed status evidence, including copied release failures", native, async () => {
+  // Each mutation runs against the real core once; only SDK delivery is deliberately corrupted.
+  // 每个变更仅在真实核心执行一次；只故意破坏 SDK 交付。
+  const cases = [
+    { type: "runtime_close", phase: "closing_runtime", corrupt: (value) => ({ ...value, runtime_id: "another-slot" }) },
+    { type: "runtime_close", phase: "closing_runtime", corrupt: () => ({}) },
+    { type: "runtime_status", phase: "draining_runtime", corrupt: (value) => ({ ...value, runtime_id: "another-slot" }) },
+    { type: "runtime_status", phase: "draining_runtime", corrupt: (value) => ({ ...value, closed: "true" }) },
+    { type: "runtime_status", phase: "draining_runtime", corrupt: (value) => ({ ...value, initialization: "unknown" }) },
+    { type: "runtime_status", phase: "draining_runtime", corrupt: (value) => ({ ...value, initialization: null }) },
+    { type: "runtime_free", phase: "releasing_runtime", corrupt: (value) => ({ ...value, runtime_id: "another-slot" }) },
+    { type: "runtime_free", phase: "releasing_runtime", corrupt: () => null },
+    { type: "runtime_free", phase: "releasing_runtime", release: true, corrupt: (value) => ({ ...value, runtime_id: "another-slot" }) },
+  ];
+  for (const scenario of cases) {
+    const original = EmbeddedScopeExecutor.prototype.submit;
+    let deliveries = 0;
+    let recoverable = false;
+    EmbeddedScopeExecutor.prototype.submit = function (command, lane) {
+      const receipt = original.call(this, command, lane);
+      if (command.type !== scenario.type) return receipt;
+      deliveries += 1;
+      return {
+        get done() { return receipt.done; }, forget: receipt.forget.bind(receipt),
+        deliveredResult: () => recoverable ? receipt.deliveredResult() : scenario.corrupt(receipt.deliveredResult()),
+        result: async () => {
+          const value = await receipt.result();
+          if (scenario.release) throw new EmbeddedResultReleaseError(EmbeddedNativeStatus.INTERNAL, null);
+          return recoverable ? value : scenario.corrupt(value);
+        },
+      };
+    };
+    try {
+      await withOwnedRuntime(async ({ adopt, runtime }) => {
+        const scope = adopt();
+        try {
+          await assert.rejects(scope.close(), /slot identity|lifecycle evidence|result_free/);
+          assert.equal(scope.status.phase, scenario.phase);
+          assert.equal(EmbeddedRuntimeScope.live.includes(scope), true);
+          assert.throws(() => runtime.free(), /lifecycle scope/);
+          await assert.rejects(scope.retryClose(), /slot identity|lifecycle evidence/);
+          assert.equal(deliveries, 1, "invalid delivery must not authorize native replay");
+        } finally {
+          // Restore the original retained receipt, not a second native operation, to complete real cleanup.
+          // 恢复原保留回执而非第二次原生操作，以完成实际清理。
+          recoverable = true;
+          await scope.retryClose();
+        }
+        assert.equal(deliveries, 1);
+      }, { initialize: false });
+    } finally { EmbeddedScopeExecutor.prototype.submit = original; }
+  }
+});

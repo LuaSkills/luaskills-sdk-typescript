@@ -1,4 +1,4 @@
-import { EmbeddedNativeStatus, type EmbeddedJsonValue, type OutputRuntimeSnapshot } from "./embedded-contract.js";
+import { EmbeddedNativeStatus, type EmbeddedJsonValue, type OutputRuntimeSnapshot, type OutputInitializationPhase } from "./embedded-contract.js";
 import { EmbeddedRuntime } from "./embedded-client.js";
 import { EmbeddedCommand, EmbeddedScopeExecutor } from "./embedded-driver.js";
 import { EmbeddedCallbackPump } from "./embedded-pump.js";
@@ -28,6 +28,10 @@ interface PendingControl {
 // Strong ownership survives discarded references and observer cancellation.
 // 强所有权跨越引用丢弃及观察取消保留。
 const LIVE_SCOPES = new Set<EmbeddedRuntimeScope>();
+
+// Exhaustiveness against the generated type makes a new initialization state require an explicit lifecycle review.
+// 生成类型的穷尽检查要求新增初始化状态接受显式生命周期审核。
+const INITIALIZATION_PHASES = { reserved: true, initializing: true, ready: true, failed: true, faulted: true } satisfies Record<OutputInitializationPhase, boolean>;
 
 /**
  * Own one exact runtime and optional callback pump while borrowing the shared driver and transport.
@@ -178,6 +182,25 @@ export class EmbeddedRuntimeScope {
   }
 
   /**
+   * Check the exact slot identity and the status fields consumed by lifecycle checkpoints.
+   * 检查生命周期检查点使用的精确槽身份及状态字段。
+   * @param type Original control command whose response is being consumed.
+   * 正在消费响应的原始控制命令。
+   * @param value Copied native result; validation never issues or replays a command.
+   * 已复制的原生结果；校验绝不发出或重放命令。
+   * @returns Nothing; malformed evidence throws before ownership can advance.
+   * 无返回值；畸形证据在所有权推进前抛错。
+   */
+  private validateControl(type: ScopeControl, value: EmbeddedJsonValue): void {
+    if (value === null || typeof value !== "object" || Array.isArray(value) || !("runtime_id" in value)
+      || value.runtime_id !== this.#runtime.runtimeId) throw new Error("Runtime scope control response changed its exact slot identity");
+    if (type === "runtime_status" && (!("closed" in value) || typeof value.closed !== "boolean"
+      || !("initialization" in value) || typeof value.initialization !== "string" || !Object.hasOwn(INITIALIZATION_PHASES, value.initialization))) {
+      throw new Error("Runtime scope control response has invalid lifecycle evidence");
+    }
+  }
+
+  /**
    * Deliver one root control or recover its exact copied response, then apply its proven checkpoint.
    * 交付一个根控制或恢复其精确复制响应，再应用已证明检查点。
    * @param type Restricted lifecycle control with known root encoding semantics.
@@ -200,13 +223,14 @@ export class EmbeddedRuntimeScope {
         this.#needsRelease = true;
         // A copied success advances the checkpoint before reporting release failure; never remove the slot twice.
         // 复制成功在报告释放失败前推进检查点；绝不移除同一槽两次。
-        try { accept(pending.receipt.deliveredResult()); pending.consumed = true; }
+        try { const copied = pending.receipt.deliveredResult(); this.validateControl(type, copied); accept(copied); pending.consumed = true; }
         catch {
           // Keep the original receipt for explicit recovery of its exact delivery.
           // 保留原回执以显式恢复精确交付。
         }
         throw error;
       }
+      this.validateControl(type, value);
       accept(value);
       this.clearPending();
     } catch (error) {
