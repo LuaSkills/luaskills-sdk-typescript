@@ -26,7 +26,7 @@ export interface EmbeddedCommandDriverConfig {
 
 /** Internal promise completion owner; external observers never receive its settle functions.
  * 内部 Promise 完成所有者；外部观察者绝不取得其完成函数。 */
-interface Completion {
+export interface Completion {
   /** Owned pending computation.
    * 拥有的待完成计算。 */
   readonly promise: Promise<void>;
@@ -44,7 +44,7 @@ interface Completion {
  * @returns One strongly retained promise and its private completion callbacks.
  * 一个强保留 Promise 及其私有完成回调。
  */
-function completion(): Completion {
+export function completion(): Completion {
   let resolve!: () => void;
   let reject!: (error: unknown) => void;
   const promise = new Promise<void>((accept, fail) => { resolve = accept; reject = fail; });
@@ -62,7 +62,7 @@ function completion(): Completion {
  * @returns Observation of completion, or the signal's original rejection reason.
  * 完成观察，或信号的原始拒绝原因。
  */
-async function observe(pending: Promise<void>, signal?: AbortSignal): Promise<void> {
+export async function observe(pending: Promise<void>, signal?: AbortSignal): Promise<void> {
   if (!signal) return pending;
   signal.throwIfAborted();
   return new Promise<void>((resolve, reject) => {
@@ -209,18 +209,22 @@ interface WorkerSlot {
 
 // A driver and its transport claim survive discarded application references and aborted observers.
 // 驱动及其传输声明跨应用引用丢弃和观察者中止继续存活。
-const LIVE_DRIVERS = new Set<EmbeddedCommandDriver>();
+const LIVE_EXECUTORS = new Set<EmbeddedCommandExecutor>();
 
 // One field authority governs strict data-only driver configuration.
 // 唯一字段权威约束严格的纯数据驱动配置。
 const CONFIG_FIELDS = ["workThreads", "maxWorkCommands", "maxControlCommands"] as const;
 
+/** Exact transport ownership category; callback executors cannot consume ordinary command capacity.
+ * 精确传输所有权类别；回调执行器不能消耗普通命令容量。 */
+type EmbeddedExecutorOwnership = { readonly kind: "command" } | { readonly kind: "callback"; readonly runtimeId: string };
+
 /** Bounded fixed-worker command driver with independent work/control queues and retained receipts.
  * 具有独立业务／控制队列和保留回执的有界固定工作线程命令驱动。 */
-export class EmbeddedCommandDriver {
+class EmbeddedCommandExecutor {
   /** Retain discoverable driver owners after discarded references or observer cancellation.
    * 丢弃引用或取消观察后，仍保留可发现的驱动所有者。 */
-  static get live(): readonly EmbeddedCommandDriver[] { return Object.freeze([...LIVE_DRIVERS]); }
+  static get live(): readonly EmbeddedCommandExecutor[] { return Object.freeze([...LIVE_EXECUTORS]); }
   // Borrowed owner and frozen local admission limits.
   // 借用所有者及冻结本地入场限制。
   private readonly transport: EmbeddedTransport;
@@ -249,22 +253,16 @@ export class EmbeddedCommandDriver {
    * 借用到实际工作线程关闭为止的现有活动传输。
    * @param config Explicit worker and retained-receipt limits.
    * 显式工作线程及保留回执限制。
+   * @param ownership Exact internal claim selected by the validated public owner.
+   * 由已校验公开所有者选定的精确内部声明。
    */
-  constructor(transport: EmbeddedTransport, config: EmbeddedCommandDriverConfig) {
-    if (config === null || typeof config !== "object" || types.isProxy(config)) throw new TypeError("Embedded driver requires exactly three data limits");
-    const descriptors = Object.getOwnPropertyDescriptors(config);
-    if (Reflect.ownKeys(descriptors).length !== CONFIG_FIELDS.length || CONFIG_FIELDS.some((key) => !Object.hasOwn(descriptors, key) || !("value" in descriptors[key]))) throw new TypeError("Embedded driver requires exactly three data limits");
-    const normalized = {} as Record<keyof EmbeddedCommandDriverConfig, number>;
-    for (const key of CONFIG_FIELDS) {
-      const value: unknown = descriptors[key].value;
-      if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) throw new RangeError(`${key} must be a positive safe integer`);
-      normalized[key] = value;
-    }
-    if (normalized.workThreads > normalized.maxWorkCommands) throw new RangeError("workThreads exceeds maxWorkCommands");
+  protected constructor(transport: EmbeddedTransport, config: EmbeddedCommandDriverConfig, private readonly ownership: EmbeddedExecutorOwnership) {
     this.transport = transport;
-    this.limits = Object.freeze(normalized);
-    const identity = transport.claimDriver(this, this.limits.workThreads + EMBEDDED_CONTROL_WORKERS);
-    LIVE_DRIVERS.add(this);
+    this.limits = Object.freeze({ ...config });
+    const identity = ownership.kind === "command"
+      ? transport.claimDriver(this, this.limits.workThreads + EMBEDDED_CONTROL_WORKERS)
+      : transport.claimCallbackPump(ownership.runtimeId, this);
+    LIVE_EXECUTORS.add(this);
     const workerData: EmbeddedWorkerConfig = { libraryPath: transport.libraryPath, transportId: identity, maxRequestBytes: transport.config.max_request_bytes, maxResponseBytes: transport.config.max_response_bytes };
     try {
       for (let index = 0; index < this.limits.workThreads + EMBEDDED_CONTROL_WORKERS; index += 1) {
@@ -285,6 +283,15 @@ export class EmbeddedCommandDriver {
   /** Return a frozen snapshot of all retained receipts, including completed and failed commands.
    * 返回全部保留回执的冻结快照，包含已完成及失败命令。 */
   get commands(): readonly EmbeddedCommand[] { return Object.freeze([...this.retained.values()].map((state) => state.receipt)); }
+
+  /**
+   * Throw the original terminal executor failure without changing any native ownership.
+   * 抛出原始执行器终止故障，不改变任何原生所有权。
+   * @returns Normally only while the executor has no terminal infrastructure failure.
+   * 仅在执行器没有终止性基础设施故障时正常返回。
+   * @internal
+   */
+  throwIfFailed(): void { if (this.failure !== null) throw this.failure; }
   /** Return real coordinator state, never an inferred core runtime or operation phase.
    * 返回真实协调器状态，绝不推断核心运行时或操作阶段。 */
   get status(): Readonly<{ ready: boolean; closing: boolean; closed: boolean; workers: number; queued: number; running: number; retainedResults: number; failure: string | null }> {
@@ -504,10 +511,62 @@ export class EmbeddedCommandDriver {
       }
     }
     if (!this.unsafeExit && this.workers.every((slot) => slot.phase === "exited")) {
-      this.transport.releaseDriver(this);
-      LIVE_DRIVERS.delete(this);
+      if (this.ownership.kind === "command") this.transport.releaseDriver(this);
+      else this.transport.releaseCallbackPump(this.ownership.runtimeId, this);
+      LIVE_EXECUTORS.delete(this);
       this.closed = true;
       this.stopped.resolve();
     }
+  }
+}
+
+/** Public bounded command driver; its control capacity is independent from every callback pump.
+ * 公开有界命令驱动；其控制容量独立于每个回调泵。 */
+export class EmbeddedCommandDriver extends EmbeddedCommandExecutor {
+  /** Discover only ordinary driver owners; callback pumps expose their own lifetime diagnostics.
+   * 仅发现普通驱动所有者；回调泵公开自身生命周期诊断。 */
+  static override get live(): readonly EmbeddedCommandDriver[] { return Object.freeze(super.live.filter((owner) => owner instanceof EmbeddedCommandDriver)); }
+
+  /**
+   * Validate data-only limits before claiming the transport or starting workers.
+   * 在声明传输或启动工作线程之前校验纯数据限制。
+   * @param transport Existing transport borrowed until actual worker exits.
+   * 借用到实际工作线程退出为止的现有传输。
+   * @param config Explicit positive business and control limits.
+   * 显式正数业务及控制限制。
+   */
+  constructor(transport: EmbeddedTransport, config: EmbeddedCommandDriverConfig) {
+    if (config === null || typeof config !== "object" || types.isProxy(config)) throw new TypeError("Embedded driver requires exactly three data limits");
+    const descriptors = Object.getOwnPropertyDescriptors(config);
+    if (Reflect.ownKeys(descriptors).length !== CONFIG_FIELDS.length || CONFIG_FIELDS.some((key) => !Object.hasOwn(descriptors, key) || !("value" in descriptors[key]))) throw new TypeError("Embedded driver requires exactly three data limits");
+    const normalized = {} as Record<keyof EmbeddedCommandDriverConfig, number>;
+    for (const key of CONFIG_FIELDS) {
+      const value: unknown = descriptors[key].value;
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) throw new RangeError(`${key} must be a positive safe integer`);
+      normalized[key] = value;
+    }
+    if (normalized.workThreads > normalized.maxWorkCommands) throw new RangeError("workThreads exceeds maxWorkCommands");
+    super(transport, normalized, { kind: "command" });
+  }
+}
+
+/** Internal single-worker executor owned by one exact runtime's callback pump.
+ * 由一个精确运行时回调泵拥有的内部单工作线程执行器。
+ * @internal
+ */
+export class EmbeddedCallbackExecutor extends EmbeddedCommandExecutor {
+  /**
+   * Claim one callback pump frame independently from the ordinary command driver.
+   * 独立于普通命令驱动声明一个回调泵帧。
+   * @param transport Exact owning transport.
+   * 精确所属传输。
+   * @param runtimeId Exact native runtime identity.
+   * 精确原生运行时身份。
+   * @param maxCommands Maximum retained callback-control receipts.
+   * 保留回调控制回执的数量上限。
+   */
+  constructor(transport: EmbeddedTransport, runtimeId: string, maxCommands: number) {
+    if (!Number.isSafeInteger(maxCommands) || maxCommands <= 0) throw new RangeError("Callback executor command capacity must be a positive safe integer");
+    super(transport, { workThreads: 0, maxWorkCommands: 0, maxControlCommands: maxCommands }, { kind: "callback", runtimeId });
   }
 }

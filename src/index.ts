@@ -53,5 +53,7 @@ export { EmbeddedNativeStatus } from "./embedded-contract.js";
 export { EmbeddedFloat, encodeEmbeddedJson, decodeEmbeddedJson } from "./embedded-json.js";
 export { EmbeddedTransport, EmbeddedTransportError, EmbeddedRuntimeError, EmbeddedResultReleaseError, type EmbeddedTransportConfig } from "./embedded-transport.js";
 export { EmbeddedCommandDriver, EmbeddedCommand, type EmbeddedCommandDriverConfig, type EmbeddedCommandLane } from "./embedded-driver.js";
+export { HostCapability, HostCallbackContext, type EmbeddedHostHandler } from "./embedded-callbacks.js";
+export { EmbeddedCallbackPump, type CallbackPumpConfig } from "./embedded-pump.js";
 export * from "./runtime-assets.js";
 export * from "./types.js";

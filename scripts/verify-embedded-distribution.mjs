@@ -25,7 +25,7 @@ export function verifyDistribution(archive) {
   const expected = ["package.json", "contracts/embedded/v1/contract.json", "contracts/embedded/v1/contract.sha256", "contracts/embedded/v1/README.md", "scripts/generate-embedded-contract.mjs", "scripts/verify-embedded-distribution.mjs", "src/embedded-contract.ts", "dist/embedded-contract.js", "dist/embedded-contract.d.ts", "dist/embedded-contract.js.map", "src/index.ts", "dist/index.js", "dist/index.d.ts"];
   // Public value types stay independent of Node globals; codec and transport artifacts are checked separately.
   // 公开值类型保持独立于 Node 全局；编码器和传输产物分别校验。
-  for (const name of ["embedded-value", "embedded-json", "embedded-transport", "embedded-driver", "embedded-worker", "embedded-worker-protocol", "embedded-worker-runtime"]) expected.push(`src/${name}.ts`, `dist/${name}.js`, `dist/${name}.d.ts`, `dist/${name}.js.map`);
+  for (const name of ["embedded-value", "embedded-json", "embedded-transport", "embedded-driver", "embedded-worker", "embedded-worker-protocol", "embedded-worker-runtime", "embedded-callbacks", "embedded-pump"]) expected.push(`src/${name}.ts`, `dist/${name}.js`, `dist/${name}.d.ts`, `dist/${name}.js.map`);
   const temporary = mkdtempSync(join(tmpdir(), "luaskills-embedded-npm-"));
   try {
     for (const relative of expected) {

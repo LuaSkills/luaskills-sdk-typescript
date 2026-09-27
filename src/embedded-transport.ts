@@ -1,4 +1,5 @@
 import { constants as bufferConstants } from "node:buffer";
+import { EMBEDDED_CONTROL_WORKERS } from "./embedded-worker-protocol.js";
 import koffi from "koffi";
 import { resolveLibraryPath } from "./ffi.js";
 import { EMBEDDED_PROTOCOL_VERSION, EmbeddedNativeStatus, type EmbeddedInteger, type EmbeddedJsonValue, type InputCommand } from "./embedded-contract.js";
@@ -275,6 +276,10 @@ export class EmbeddedTransport {
   // A driver claim spans startup, queued work, retained results and actual worker exits.
   // 驱动声明覆盖启动、排队工作、保留结果及实际工作线程退出。
   private commandDriver: object | null = null;
+  // Callback executors have independent frames and one exact owner per native runtime identity.
+  // 回调执行器拥有独立帧，且每个原生运行时身份仅有一个精确所有者。
+  private readonly callbackPumps = new Map<string, object>();
+  private commandSlots = 0;
 
   /**
    * Bind all five exports before allocating ownership with explicit validated budgets.
@@ -379,7 +384,7 @@ export class EmbeddedTransport {
    * 实际运行时排空后移除原生所有权；拒绝后传输仍可用于清理。 */
   free(): void {
     const identity = this.requireIdentity();
-    if (this.activeCalls || this.results.size || this.commandDriver !== null) throw new Error("Embedded transport still owns active calls or results or a command driver");
+    if (this.activeCalls || this.results.size || this.commandDriver !== null || this.callbackPumps.size) throw new Error("Embedded transport still owns active calls or results or a command driver or callback pump");
     this.activeCalls += 1;
     try {
       this.check("luaskills_ffi_embedded_transport_free_v1", this.nativeFree(identity));
@@ -421,8 +426,10 @@ export class EmbeddedTransport {
   claimDriver(owner: object, slots: number): bigint {
     const identity = this.requireIdentity();
     if (this.commandDriver !== null) throw new Error("Embedded transport already has a command driver");
-    if (!Number.isSafeInteger(slots) || slots <= 0 || BigInt(slots) > this.budgets.max_result_buffers || BigInt(slots) * this.budgets.max_response_bytes > this.budgets.max_result_bytes) throw new RangeError("Native transport cannot reserve the driver's concurrent response frames");
+    if (!Number.isSafeInteger(slots) || slots <= 0) throw new RangeError("Driver slots must be a positive safe integer");
+    this.checkWorkerFrames(BigInt(slots) + BigInt(this.callbackPumps.size) * BigInt(EMBEDDED_CONTROL_WORKERS));
     this.commandDriver = owner;
+    this.commandSlots = slots;
     return identity;
   }
 
@@ -436,5 +443,51 @@ export class EmbeddedTransport {
   releaseDriver(owner: object): void {
     if (this.commandDriver !== owner) throw new Error("Embedded command driver ownership mismatch");
     this.commandDriver = null;
+    this.commandSlots = 0;
+  }
+
+  /**
+   * Claim one independent callback control frame before its worker starts.
+   * 在工作线程启动前声明一个独立回调控制帧。
+   * @param runtimeId Exact runtime identity, never a capability name.
+   * 精确运行时身份，绝不使用能力名称。
+   * @param owner Actual callback executor retained until safe worker exit.
+   * 保留到工作线程安全退出的实际回调执行器。
+   * @returns Exact borrowed transport identity.
+   * 精确借用传输身份。
+   * @internal
+   */
+  claimCallbackPump(runtimeId: string, owner: object): bigint {
+    const identity = this.requireIdentity();
+    if (typeof runtimeId !== "string" || runtimeId.length === 0) throw new TypeError("Callback pump requires an exact runtime identity");
+    if (this.callbackPumps.has(runtimeId)) throw new Error("Embedded runtime already has a callback pump");
+    if (BigInt(this.callbackPumps.size) >= this.budgets.max_runtimes) throw new RangeError("Callback pump ownership exceeds runtime capacity");
+    this.checkWorkerFrames(BigInt(this.commandSlots) + (BigInt(this.callbackPumps.size) + 1n) * BigInt(EMBEDDED_CONTROL_WORKERS));
+    this.callbackPumps.set(runtimeId, owner);
+    return identity;
+  }
+
+  /**
+   * Return only the exact pump declaration after actual native worker drainage.
+   * 在实际原生工作线程排空后，仅归还精确泵声明。
+   * @param runtimeId Original declared runtime identity.
+   * 原始声明运行时身份。
+   * @param owner Original callback executor.
+   * 原始回调执行器。
+   * @internal
+   */
+  releaseCallbackPump(runtimeId: string, owner: object): void {
+    if (this.callbackPumps.get(runtimeId) !== owner) throw new Error("Embedded callback pump ownership mismatch");
+    this.callbackPumps.delete(runtimeId);
+  }
+
+  /**
+   * Validate aggregate worst-case native response frames from all SDK-owned workers.
+   * 校验全部 SDK 拥有工作线程的聚合最坏情况原生响应帧。
+   * @param slots Exact combined frame count; arithmetic remains bigint throughout.
+   * 精确合计帧数；整个算术过程保持 bigint。
+   */
+  private checkWorkerFrames(slots: bigint): void {
+    if (slots > this.budgets.max_result_buffers || slots * this.budgets.max_response_bytes > this.budgets.max_result_bytes) throw new RangeError("Native transport cannot reserve concurrent response frames for SDK workers");
   }
 }

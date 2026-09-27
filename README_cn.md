@@ -12,7 +12,7 @@ SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正
 
 ## 嵌入式运行时契约（开发中）
 
-`embeddedContract` 导出生成的请求／响应类型、逐命令响应映射及精确契约摘要。包内 `contracts/embedded/v1/` 复制自正在开发的核心，输入与输出类型分别反映 Rust 反序列化和序列化规则。`EmbeddedNativeStatus` 也从包顶层导出。这是开发契约，现有已发布的 0.5.7 原生库不提供新增嵌入式运行时 API。`EmbeddedTransport` 已向显式选择的匹配库绑定五个新 C 导出；异步命令驱动已接通固定工作线程；自动回调泵及高级生命周期接口仍在实施。
+`embeddedContract` 导出生成的请求／响应类型、逐命令响应映射及精确契约摘要。包内 `contracts/embedded/v1/` 复制自正在开发的核心，输入与输出类型分别反映 Rust 反序列化和序列化规则。`EmbeddedNativeStatus` 也从包顶层导出。这是开发契约，现有已发布的 0.5.7 原生库不提供新增嵌入式运行时 API。`EmbeddedTransport` 已向显式选择的匹配库绑定五个新 C 导出；异步命令驱动已接通固定工作线程；自动回调泵已接通；高级生命周期接口仍在实施。
 
 宽整数使用 `EmbeddedInteger`（`number | bigint`），超出 JavaScript 安全整数范围时必须使用 `bigint`。`encodeEmbeddedJson(value, maxBytes)` 和 `decodeEmbeddedJson(bytes)` 完整保留有符号／无符号 64 位整数，不将数字变成字符串。不安全的普通整数 number 会被拒绝：精确整数使用 `bigint`，包括 `1e100` 在内的显式有限浮点数使用 `new EmbeddedFloat(value)`。整数形浮点词元解码为 `EmbeddedFloat`（通过 `.value` 读取）；有小数部分的词元解码为普通 number，负零保持不变。不能对这些值使用普通 `JSON.stringify`。运行时授权和生命周期规则仍由核心负责；显式 JSON 空值与省略字段使用不同类型。建议启用 `strict` 和 `exactOptionalPropertyTypes`。
 
@@ -25,6 +25,16 @@ SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正
 两条通道分别限制排队、运行及已完成但未遗忘的全部回执。`commands` 和 `EmbeddedCommandDriver.live` 提供冻结所有者快照；`receipt.forget()` 仅归还已完成的本地回执配额，不删除核心操作。取消 `ready()`、`result()` 或 `close()` 的观察不会终止实际调用；原有回执及响应字节仍可读取。驱动拒绝阻塞式 `operation_wait`，应轮询 `operation_status`。控制通道用于查询、取消和宿主确认，调用方不能将初始化等长操作放入该通道。
 
 工作线程复制响应后才释放原生结果；释放失败会暂停该线程后续入场，保留描述符及原始交付字节，`driver.releaseResults()` 显式恢复精确释放，不重放业务。驱动 `close()` 拒绝新命令，完成已接纳命令，并等待全部 Worker 的停止确认及实际退出后归还传输声明；它不关闭借用的原生运行时或传输。应先完成所有宿主处理器确认，再关闭命令驱动，随后按原生生命周期清理。启动前关闭会拒绝就绪观察并继续等待实际线程退出。没有排空证明的线程异常退出或消息发送故障会保留传输声明并显式报告基础设施故障，需要进程级恢复；不会强杀线程、自动替换执行器或重试业务。
+
+`EmbeddedCallbackPump(transport, runtimeId, { maxConcurrentHandlers, maxPendingCommands, pollIntervalMs })` 为已初始化运行时保留一个额外的独立控制 Worker；同一传输和运行时只能有一个泵。传输预算统一检查普通驱动与所有泵的最大同时响应帧。先等待 `pump.ready()`，再使用 `pump.register([new HostCapability(descriptor, handler)])` 注册显式 `queued` 能力。完整描述符在入场时按传输字节预算复制冻结，处理器按精确注册 ID 路由，不按可变名称查找；新注册只对新池快照生效，旧池不能重定向到替换处理器。不要通过原始命令为该运行时添加其他队列处理器。
+
+处理器接收结构化参数和 `HostCallbackContext`，支持同步返回值及 Promise。可信 `caller` 与应用参数分离且不可变；`signal`、`cancellation` 和 `throwIfCancelled()` 只观察核心取消，`remainingMs` 是精确 bigint 参考时长。`reportEffects()` 显式报告事务事实；变更类默认 unknown，只读类默认 not_applicable，不从成功或取消推断提交。处理器实际返回后封存副作用，复制冻结确认数据，清除 SDK 对可变返回值的别名。普通异常使用不包含秘密的通用错误，显式 SDK 错误保留有效协议分类；无效或超大输出转为保留原副作用的有界失败。Lua 能力调用返回含 ok、value 或 error、effects 的信封，处理器失败不自动等于外层 Lua 操作失败。
+
+JavaScript 处理器在拥有泵的 Node 事件循环运行；同步处理器必须短小，不能阻塞等待或执行长时间 CPU 工作，耗时 I/O 应返回 Promise。返回的 Promise 必须覆盖处理器的全部工作；脱离它的后台任务不在泵的所有权范围。`maxConcurrentHandlers` 包括等待确认的完成结果；`maxPendingCommands` 限制尚未结束或交付不确定的注册批次。注销按已有注册共享排空等待，关闭和恢复不消耗注册入场配额。`pump.status` 和 `EmbeddedCallbackPump.live` 保留可查询身份。取消注册、注销或关闭的观察不丢弃真实拥有状态；从处理器等待自己的泵会明确拒绝。
+
+`pump.unregister(id)` 等待原生及 JavaScript 实际排空，再遗忘核心注册元数据；`pump.close()` 停止接纳和取出新回调，注销拥有注册，完成实际处理器与确认后才等待 Worker 退出。注销不会伪造运行中处理器的取消；需要中断操作时使用核心取消申请或运行时关闭，并继续等待协作处理器真实返回。泵不关闭借用运行时或传输。完成泵排空后，再完成普通驱动及原生运行时的生命周期清理。
+
+响应异常导致的注册、请求提取、注销和元数据遗忘都保留原始命令回执，不自动重放。恢复已提取批次时先安装精确请求，再将此前尚未启动的各处理器执行一次，不重复原生提取；`status.pendingExtraction` 和 `status.needsResultRelease` 公布尚未确认的提取及缓冲恢复所有权。未确认的宿主完成结果继续占用处理器名额，故障会停止新的回调入场。`retryAcknowledgements()` 显式回收失败缓冲，并用原始回执或精确操作副作用记录核对实际完成；仅在核心证明请求仍待确认时重新交付原冻结确认，不重新执行处理器。not_found 或 already_completed 本身不作为已完成证据。缺少交付证据时保留所有权；工作线程终止性基础设施故障会拒绝关闭观察，不宣称成功或释放缺少证明的声明。持久崩溃恢复日志仍属于后续实施，不把这些内存证据当作持久恢复。
 
 执行 `npm run generate:embedded-contract` 可完全离线重新生成；`node scripts/generate-embedded-contract.mjs --check` 只读比较。显式同步新核心产物时使用 `--source <path/to/contract.json>`，相邻摘要和 README 必须存在。未知 Schema、重复 JSON 成员、缺失局部引用、冲突输出定义、标识符冲突及命令覆盖漂移均使生成失败。npm 包包含生成器及完整契约，不依赖开发机仓库路径。
 
