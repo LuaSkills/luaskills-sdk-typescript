@@ -26,7 +26,7 @@ jobs:
       - run: npm run check
       - run: npm run build
       - run: node --test tests/embedded-contract.mjs
-      - run: node --test tests/embedded-json.mjs tests/embedded-native.mjs tests/embedded-driver.mjs tests/embedded-worker.mjs tests/embedded-pump.mjs tests/embedded-client.mjs tests/embedded-scope.mjs
+      - run: node --test tests/embedded-json.mjs tests/embedded-json-vectors.mjs tests/embedded-native.mjs tests/embedded-driver.mjs tests/embedded-worker.mjs tests/embedded-pump.mjs tests/embedded-client.mjs tests/embedded-scope.mjs
       - name: Pack and verify the exact artifact
         shell: bash
         run: |

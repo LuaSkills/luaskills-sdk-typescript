@@ -53,9 +53,17 @@ assert.ok(Object.isFrozen(contract.EmbeddedNativeStatus));`;
     execFileSync(process.execPath, ["--input-type=module", "-e", check, pathToFileURL(join(temporary, "dist/embedded-contract.js")).href], { cwd: temporary, stdio: "pipe" });
     // The codec executes from the actual package without loading Koffi or borrowing repository modules.
     // 编码器从实际包执行，不加载 Koffi，也不借用仓库模块。
-    const codecCheck = `import assert from 'node:assert/strict'; const codec = await import(process.argv[1]);
+    const codecCheck = `import assert from 'node:assert/strict'; import {readFileSync} from 'node:fs'; const codec = await import(process.argv[1]);
 const value = { integer: 18446744073709551615n, float: new codec.EmbeddedFloat(1e100), empty: null };
-assert.deepEqual(codec.decodeEmbeddedJson(codec.encodeEmbeddedJson(value, 4096)), value);`;
+assert.deepEqual(codec.decodeEmbeddedJson(codec.encodeEmbeddedJson(value, 4096)), value);
+const vectors = JSON.parse(readFileSync('contracts/embedded/v1/contract.json', 'utf8')).json_vectors;
+assert.equal(vectors.version, 1);
+for (const entry of vectors.valid) {
+  const original = codec.decodeEmbeddedJson(Buffer.from(entry.json));
+  assert.deepEqual(codec.decodeEmbeddedJson(codec.encodeEmbeddedJson(original, 4096)), original, entry.id);
+}
+for (const entry of vectors.invalid) assert.throws(() => codec.decodeEmbeddedJson(Buffer.from(entry.json)), entry.id);
+for (const entry of vectors.invalid_bytes) assert.throws(() => codec.decodeEmbeddedJson(Buffer.from(entry.hex, 'hex')), entry.id);`;
     execFileSync(process.execPath, ["--input-type=module", "-e", codecCheck, pathToFileURL(join(temporary, "dist/embedded-json.js")).href], { cwd: temporary, stdio: "pipe" });
   } finally {
     rmSync(temporary, { recursive: true, force: true });

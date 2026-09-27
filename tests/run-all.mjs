@@ -17,6 +17,7 @@ const testFiles = [
   "skill-config-contract.mjs",
   "embedded-contract.mjs",
   "embedded-json.mjs",
+  "embedded-json-vectors.mjs",
   "embedded-native.mjs",
   "embedded-driver.mjs",
   "embedded-worker.mjs",
