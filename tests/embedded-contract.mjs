@@ -23,8 +23,10 @@ const contract = parseContract(bytes);
 /**
  * Compile a temporary consumer against actual declarations and return readable diagnostics.
  * 编译针对实际声明的临时消费程序并返回可读诊断。
- * @param {string} source Consumer TypeScript source. 消费程序 TypeScript 源码。
- * @returns {string[]} All compilation diagnostics. 全部编译诊断。
+ * @param {string} source Consumer TypeScript source.
+ * 消费程序 TypeScript 源码。
+ * @returns {string[]} All compilation diagnostics.
+ * 全部编译诊断。
  */
 function compileConsumer(source) {
   const directory = mkdtempSync(join(tmpdir(), "luaskills-embedded-types-"));
@@ -45,10 +47,14 @@ function compileConsumer(source) {
 /**
  * Run the standalone generator with the current interpreter and require a specific result.
  * 使用当前解释器运行独立生成器，并要求特定结果。
- * @param {string} script Exact generator path. 精确生成器路径。
- * @param {string[]} args Explicit arguments. 显式参数。
- * @param {boolean} success Expected successful exit. 是否预期成功退出。
- * @returns {string} Combined diagnostics for negative assertions. 供失败断言使用的合并诊断。
+ * @param {string} script Exact generator path.
+ * 精确生成器路径。
+ * @param {string[]} args Explicit arguments.
+ * 显式参数。
+ * @param {boolean} success Expected successful exit.
+ * 是否预期成功退出。
+ * @returns {string} Combined diagnostics for negative assertions.
+ * 供失败断言使用的合并诊断。
  */
 function runGenerator(script, args, success) {
   const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });

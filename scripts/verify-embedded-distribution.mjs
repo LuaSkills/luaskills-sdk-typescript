@@ -8,8 +8,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 /**
  * Verify actual npm archive bytes and rebuild its contract in an isolated directory.
  * 验证实际 npm 归档字节，并在隔离目录内重建其契约。
- * @param {string} archive Explicit locally built npm archive path. 显式本地构建的 npm 归档路径。
- * @returns {void} Throws on missing, changed or non-portable embedded artifacts. 嵌入式产物缺失、变更或不可移植时抛错。
+ * @param {string} archive Explicit locally built npm archive path.
+ * 显式本地构建的 npm 归档路径。
+ * @returns {void} Throws on missing, changed or non-portable embedded artifacts.
+ * 嵌入式产物缺失、变更或不可移植时抛错。
  */
 export function verifyDistribution(archive) {
   // The system tar reads exact members to stdout; arbitrary archive paths are never extracted.

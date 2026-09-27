@@ -17,8 +17,10 @@ const keywords = new Set([...annotations, "$ref", "type", "properties", "require
 /**
  * Convert a wire name to a stable PascalCase identifier; reject unsupported names.
  * 将线名称转换为稳定的大驼峰标识符；拒绝不支持的名称。
- * @param {string} name Exact Rust name. 精确 Rust 名称。
- * @returns {string} A TypeScript identifier. TypeScript 标识符。
+ * @param {string} name Exact Rust name.
+ * 精确 Rust 名称。
+ * @returns {string} A TypeScript identifier.
+ * TypeScript 标识符。
  */
 function identifier(name) {
   const result = name.split("_").map((part) => part.slice(0, 1).toUpperCase() + part.slice(1)).join("");
@@ -29,8 +31,10 @@ function identifier(name) {
 /**
  * Parse verified UTF-8 JSON while rejecting duplicate keys and unsafe metadata numbers.
  * 解析已校验 UTF-8 JSON，同时拒绝重复键和不安全的元数据数值。
- * @param {Uint8Array} bytes Exact contract bytes. 精确契约字节。
- * @returns {object} Parsed contract without overwritten members. 未覆盖成员的解析契约。
+ * @param {Uint8Array} bytes Exact contract bytes.
+ * 精确契约字节。
+ * @returns {object} Parsed contract without overwritten members.
+ * 未覆盖成员的解析契约。
  */
 export function parseContract(bytes) {
   // Native parsing proves grammar first; the second lexical pass only tracks object key uniqueness.
@@ -62,8 +66,10 @@ export function parseContract(bytes) {
 /**
  * Verify one independent schema root before any output definitions can be merged.
  * 在合并任何输出定义之前验证一个独立 Schema 根。
- * @param {object} rootSchema Independent Rust schema. 独立 Rust Schema。
- * @returns {void} Throws for unknown constructs or foreign references. 对未知结构或外部引用抛错。
+ * @param {object} rootSchema Independent Rust schema.
+ * 独立 Rust Schema。
+ * @returns {void} Throws for unknown constructs or foreign references.
+ * 对未知结构或外部引用抛错。
  */
 function verifySchema(rootSchema) {
   const definitions = rootSchema.$defs ?? {};
@@ -105,9 +111,12 @@ function verifySchema(rootSchema) {
 /**
  * Render safe JSDoc from the actual bilingual Rust description or an explicit generated label.
  * 从实际 Rust 双语说明或显式生成标签渲染安全 JSDoc。
- * @param {object} schema Source description owner. 源说明所属 Schema。
- * @param {string} name Declaration name. 声明名称。
- * @returns {string} Escaped documentation block. 已转义的文档块。
+ * @param {object} schema Source description owner.
+ * 源说明所属 Schema。
+ * @param {string} name Declaration name.
+ * 声明名称。
+ * @returns {string} Escaped documentation block.
+ * 已转义的文档块。
  */
 function documentation(schema, name) {
   const description = schema.description ?? `Generated wire shape for ${name}.\n${name} 的生成线形状。`;
@@ -117,9 +126,12 @@ function documentation(schema, name) {
 /**
  * Render the explicitly supported shape without replacing unknown schemas with any.
  * 渲染显式支持的形状，不把未知 Schema 替换为 any。
- * @param {object} schema Validated shape. 已校验的形状。
- * @param {Map<string,string>} names Exact local reference bindings. 精确局部引用绑定。
- * @returns {string} TypeScript type expression. TypeScript 类型表达式。
+ * @param {object} schema Validated shape.
+ * 已校验的形状。
+ * @param {Map<string,string>} names Exact local reference bindings.
+ * 精确局部引用绑定。
+ * @returns {string} TypeScript type expression.
+ * TypeScript 类型表达式。
  */
 function expression(schema, names) {
   if ("$ref" in schema) return names.get(schema.$ref.slice(8));
@@ -169,9 +181,12 @@ function expression(schema, names) {
 /**
  * Generate all types, command mappings and identity metadata from one verified core contract.
  * 从一份已校验核心契约生成全部类型、命令映射和身份元数据。
- * @param {object} contract Parsed core document. 已解析的核心文档。
- * @param {Uint8Array} bytes Original hashed bytes. 计算摘要的原始字节。
- * @returns {string} Deterministic LF TypeScript source. 确定性的 LF TypeScript 源码。
+ * @param {object} contract Parsed core document.
+ * 已解析的核心文档。
+ * @param {Uint8Array} bytes Original hashed bytes.
+ * 计算摘要的原始字节。
+ * @returns {string} Deterministic LF TypeScript source.
+ * 确定性的 LF TypeScript 源码。
  */
 export function generate(contract, bytes) {
   if (contract.contract_version !== 1 || contract.generator.schema_draft !== "2020-12") throw new Error("Unsupported contract version or draft");
@@ -227,8 +242,10 @@ export function generate(contract, bytes) {
 /**
  * Read and check offline artifacts, or explicitly synchronize a caller-selected upstream contract.
  * 读取并检查离线产物，或显式同步调用方选择的上游契约。
- * @param {string[]} args CLI arguments: --check or --source <contract.json>. 命令行参数。
- * @returns {void} Writes only after generation succeeds; check mode never writes. 生成成功后才写入；检查模式不写入。
+ * @param {string[]} args CLI arguments: --check or --source <contract.json>.
+ * 命令行参数。
+ * @returns {void} Writes only after generation succeeds; check mode never writes.
+ * 生成成功后才写入；检查模式不写入。
  */
 export function main(args) {
   let check = false;
