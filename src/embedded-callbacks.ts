@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import type { EmbeddedJsonValue, InputCapabilityDescriptor, InputEffectState, InputEmbeddedError, InputEmbeddedErrorCode, OutputCapabilityCaller, OutputEmbeddedError, OutputHostRequest } from "./embedded-contract.js";
 import { decodeEmbeddedJson, embeddedUnsignedInteger, encodeEmbeddedJson } from "./embedded-json.js";
 import { EmbeddedRuntimeError } from "./embedded-transport.js";
@@ -6,10 +5,6 @@ import { EmbeddedRuntimeError } from "./embedded-transport.js";
 /** Both synchronous and promise-returning handlers run on the owning Node event loop.
  * 同步处理器及返回 Promise 的处理器均在所属 Node 事件循环中运行。 */
 export type EmbeddedHostHandler = (argumentsValue: EmbeddedJsonValue, context: HostCallbackContext) => EmbeddedJsonValue | PromiseLike<EmbeddedJsonValue>;
-
-/** Internal exact handler owner inherited by asynchronous continuations for self-drain guards.
- * 异步继续执行继承的内部精确处理器所有者，用于阻止等待自身排空。 */
-export const HOST_CALLBACK_OWNER = new AsyncLocalStorage<object>();
 
 // The exhaustive map is compiler-checked against the generated protocol union.
 // 完整映射由编译器对照生成协议联合类型校验。

@@ -5,6 +5,7 @@ import { EMBEDDED_PROTOCOL_VERSION, type EmbeddedJsonValue, type InputCommand } 
 import { decodeEmbeddedJson, encodeEmbeddedJson } from "./embedded-json.js";
 import { EmbeddedTransport, EmbeddedTransportError, EmbeddedResultReleaseError, decodeEmbeddedResponse } from "./embedded-transport.js";
 import { EMBEDDED_CONTROL_WORKERS, type EmbeddedWorkerConfig, type EmbeddedWorkerError, type EmbeddedWorkerReply, type EmbeddedWorkerRequest } from "./embedded-worker-protocol.js";
+import { checkEmbeddedCallbackWait, completion, observe, type Completion } from "./embedded-observation.js";
 
 /** Separate admission and execution lanes; the control worker never executes business-lane jobs.
  * 独立入场和执行通道；控制工作线程绝不执行业务通道任务。 */
@@ -22,55 +23,6 @@ export interface EmbeddedCommandDriverConfig {
   /** Queued, running and completed-but-unforgotten control receipts.
    * 排队、运行中及已完成但尚未遗忘的控制回执。 */
   readonly maxControlCommands: number;
-}
-
-/** Internal promise completion owner; external observers never receive its settle functions.
- * 内部 Promise 完成所有者；外部观察者绝不取得其完成函数。 */
-export interface Completion {
-  /** Owned pending computation.
-   * 拥有的待完成计算。 */
-  readonly promise: Promise<void>;
-  /** Publish actual completion.
-   * 发布实际完成。 */
-  readonly resolve: () => void;
-  /** Publish an infrastructure failure without cancelling native work.
-   * 发布基础设施失败，不取消原生工作。 */
-  readonly reject: (error: unknown) => void;
-}
-
-/**
- * Allocate an owned completion and consume internal rejection notifications without hiding observer errors.
- * 分配拥有型完成对象并消费内部拒绝通知，同时保留观察者错误。
- * @returns One strongly retained promise and its private completion callbacks.
- * 一个强保留 Promise 及其私有完成回调。
- */
-export function completion(): Completion {
-  let resolve!: () => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<void>((accept, fail) => { resolve = accept; reject = fail; });
-  void promise.catch(() => {});
-  return { promise, resolve, reject };
-}
-
-/**
- * Observe a promise with independent cancellation; abort never settles or cancels the owned computation.
- * 以独立取消观察 Promise；中止绝不完成或取消拥有的计算。
- * @param pending Actual owned completion.
- * 实际拥有的完成对象。
- * @param signal Optional observer-only abort signal.
- * 可选且仅作用于观察者的中止信号。
- * @returns Observation of completion, or the signal's original rejection reason.
- * 完成观察，或信号的原始拒绝原因。
- */
-export async function observe(pending: Promise<void>, signal?: AbortSignal): Promise<void> {
-  if (!signal) return pending;
-  signal.throwIfAborted();
-  return new Promise<void>((resolve, reject) => {
-    const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason); };
-    signal.addEventListener("abort", abort, { once: true });
-    void pending.then(() => { signal.removeEventListener("abort", abort); resolve(); }, (error) => { signal.removeEventListener("abort", abort); reject(error); });
-    if (signal.aborted) abort();
-  });
 }
 
 /**
@@ -161,6 +113,7 @@ export class EmbeddedCommand {
    * 新解码结果；抛出保留传输错误或已交付核心错误。
    */
   async result(options: { signal?: AbortSignal } = {}): Promise<EmbeddedJsonValue> {
+    checkEmbeddedCallbackWait();
     await observe(this.#state.completion.promise, options.signal);
     if (this.#state.error) throw this.#state.error;
     return this.deliveredResult();
@@ -300,7 +253,10 @@ class EmbeddedCommandExecutor {
 
   /** Await worker binding readiness; signal cancels only this observer.
    * 等待工作线程绑定就绪；signal 仅取消此观察者。 */
-  ready(options: { signal?: AbortSignal } = {}): Promise<void> { return observe(this.started.promise, options.signal); }
+  ready(options: { signal?: AbortSignal } = {}): Promise<void> {
+    if (this.ownership.kind === "command") checkEmbeddedCallbackWait();
+    return observe(this.started.promise, options.signal);
+  }
 
   /**
    * Freeze a command and publish its receipt before dispatch to the declared lane.
@@ -313,6 +269,7 @@ class EmbeddedCommandExecutor {
    * 保留的可观察回执，即使观察者随后中止也保留。
    */
   submit(command: InputCommand, lane: EmbeddedCommandLane = "work"): EmbeddedCommand {
+    if (this.ownership.kind === "command") checkEmbeddedCallbackWait();
     if (!this.readyState || this.closing || this.failure) throw new Error("Embedded command driver is not accepting commands");
     if (lane !== "work" && lane !== "control") throw new TypeError("Unknown embedded command lane");
     const limit = lane === "work" ? this.limits.maxWorkCommands : this.limits.maxControlCommands;
@@ -345,6 +302,7 @@ class EmbeddedCommandExecutor {
    * 当前全部保留释放尝试的完成；绝不重放业务请求。
    */
   async releaseResults(): Promise<void> {
+    if (this.ownership.kind === "command") checkEmbeddedCallbackWait();
     if (this.failure) throw this.failure;
     const pending: Promise<void>[] = [];
     for (const slot of this.workers) {
@@ -369,6 +327,7 @@ class EmbeddedCommandExecutor {
    * 实际驱动关闭；不会关闭借用的核心传输或运行时。
    */
   close(options: { signal?: AbortSignal } = {}): Promise<void> {
+    if (this.ownership.kind === "command") checkEmbeddedCallbackWait();
     this.closing = true;
     if (!this.readyState) this.started.reject(new Error("Embedded command driver closed before becoming ready"));
     this.dispatch();
@@ -536,6 +495,7 @@ export class EmbeddedCommandDriver extends EmbeddedCommandExecutor {
    * 显式正数业务及控制限制。
    */
   constructor(transport: EmbeddedTransport, config: EmbeddedCommandDriverConfig) {
+    checkEmbeddedCallbackWait();
     if (config === null || typeof config !== "object" || types.isProxy(config)) throw new TypeError("Embedded driver requires exactly three data limits");
     const descriptors = Object.getOwnPropertyDescriptors(config);
     if (Reflect.ownKeys(descriptors).length !== CONFIG_FIELDS.length || CONFIG_FIELDS.some((key) => !Object.hasOwn(descriptors, key) || !("value" in descriptors[key]))) throw new TypeError("Embedded driver requires exactly three data limits");

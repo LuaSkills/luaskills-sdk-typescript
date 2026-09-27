@@ -55,5 +55,6 @@ export { EmbeddedTransport, EmbeddedTransportError, EmbeddedRuntimeError, Embedd
 export { EmbeddedCommandDriver, EmbeddedCommand, type EmbeddedCommandDriverConfig, type EmbeddedCommandLane } from "./embedded-driver.js";
 export { HostCapability, HostCallbackContext, type EmbeddedHostHandler } from "./embedded-callbacks.js";
 export { EmbeddedCallbackPump, type CallbackPumpConfig } from "./embedded-pump.js";
+export { EmbeddedPending, EmbeddedClient, EmbeddedRuntime, EmbeddedPlugin, EmbeddedPool, EmbeddedSession, EmbeddedSessionOpen, EmbeddedOperation } from "./embedded-client.js";
 export * from "./runtime-assets.js";
 export * from "./types.js";

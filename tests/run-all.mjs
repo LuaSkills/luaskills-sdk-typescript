@@ -21,6 +21,7 @@ const testFiles = [
   "embedded-driver.mjs",
   "embedded-worker.mjs",
   "embedded-pump.mjs",
+  "embedded-client.mjs",
   "skill-config-native-e2e.mjs",
   "skill-operation-progress-callback.mjs",
   "system-management-raw-call-boundary.mjs",

@@ -36,6 +36,14 @@ JavaScript 处理器在拥有泵的 Node 事件循环运行；同步处理器必
 
 响应异常导致的注册、请求提取、注销和元数据遗忘都保留原始命令回执，不自动重放。恢复已提取批次时先安装精确请求，再将此前尚未启动的各处理器执行一次，不重复原生提取；`status.pendingExtraction` 和 `status.needsResultRelease` 公布尚未确认的提取及缓冲恢复所有权。未确认的宿主完成结果继续占用处理器名额，故障会停止新的回调入场。`retryAcknowledgements()` 显式回收失败缓冲，并用原始回执或精确操作副作用记录核对实际完成；仅在核心证明请求仍待确认时重新交付原冻结确认，不重新执行处理器。not_found 或 already_completed 本身不作为已完成证据。缺少交付证据时保留所有权；工作线程终止性基础设施故障会拒绝关闭观察，不宣称成功或释放缺少证明的声明。持久崩溃恢复日志仍属于后续实施，不把这些内存证据当作持久恢复。
 
+`EmbeddedClient(driver)` 提供运行时、插件、池、固定会话和操作的类型句柄。`client.reserve()` 立即返回 `EmbeddedPending<EmbeddedRuntime>`；原生变更保留原始回执，直到显式 `forget()`。`pending.result({ signal })` 观察交付，`pending.deliveredResult()` 从复制证据恢复释放失败前的交付，`pending.map()` 只为同一回执建立本地视图。投影失败或观察取消后，原始证据仍保留在驱动器中。这些句柄借用驱动器，不自动完成原生生命周期清理；拥有型运行时作用域仍在实施。
+
+`runtime.initialize(engineOptions, runtimeConfig)` 是单次构造尝试；必须查询 `runtime.status()` 区分预留、初始化中、就绪、失败及故障，初始化回执本身不代表成功。`runtime.registerPlugin()` 设置聚合预算；`runtime.registerPool()` 保留不可变定义、显式权限及执行修订。`pool.submit()` 和 `session.submit()` 返回操作身份回执，不是 Lua 完成结果；`pool.openSession()` 同时返回会话及独立可查询的初始化操作。句柄身份不可重定向；已知身份构造器不探测或推断原生存在性。
+
+`operation.wait({ signal, pollIntervalMs })` 使用预留控制通道轮询真实核心快照，仅自动消费成功的只读查询回执，并返回含副作用证据的成功、失败或取消终态。使用 `AbortSignal`（包括 `AbortSignal.timeout`）限制观察时长，不会因此取消原生执行。`operation.cancel()` 独立请求协作取消；`operation.forget()` 移除核心记录，与遗忘 SDK 回执相互独立。中断或失败的查询仍可通过 `driver.commands` 找回。轮询在入场前校验正整数定时器边界；实现受控依赖跟踪前，宿主回调中的普通驱动器及生命周期等待明确返回不支持，包括跨运行时等待。
+
+现有 `createEngineOptions()` 已可与生成的嵌入式输入契约组合使用。其 JSON 选项结构调整为结构化类型别名，不再支持对原接口进行声明合并；缓存配置使用生成契约中的三个数字字段，不接受任意 JSON。完整显式引擎选项必须提供 `enable_managed_io_compat`；构建器仍允许部分覆盖，并按现有规则合并嵌套能力及控制器默认值。旧 JSON 选项继续使用 `number`，需要精确 bigint 预算时使用生成的嵌入式类型。这些是后续统一版本的开发迁移变化，不代表已发布 0.5.7 动态库已更新。
+
 执行 `npm run generate:embedded-contract` 可完全离线重新生成；`node scripts/generate-embedded-contract.mjs --check` 只读比较。显式同步新核心产物时使用 `--source <path/to/contract.json>`，相邻摘要和 README 必须存在。未知 Schema、重复 JSON 成员、缺失局部引用、冲突输出定义、标识符冲突及命令覆盖漂移均使生成失败。npm 包包含生成器及完整契约，不依赖开发机仓库路径。
 
 `npm pack` 在构建前检查生成文件。针对该精确本地产物执行 `node scripts/verify-embedded-distribution.mjs <archive.tgz>`，可比较嵌入式成员字节，在新进程导入包内编译契约，并运行独立生成器。此开发验证器需要系统 `tar` 命令；普通离线生成只需 Node.js。契约 CI 覆盖 Linux、Windows、macOS 上的 Node 24／26，不代表原生嵌入式运行时验收。

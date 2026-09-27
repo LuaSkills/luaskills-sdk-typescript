@@ -1,6 +1,7 @@
 import { types } from "node:util";
-import { EmbeddedCallbackExecutor, EmbeddedCommand, completion, observe, type Completion } from "./embedded-driver.js";
-import { HostCapability, HostCallbackContext, HOST_CALLBACK_OWNER, callbackFailure, freezeCallbackJson, type HostCapabilitySnapshot } from "./embedded-callbacks.js";
+import { EmbeddedCallbackExecutor, EmbeddedCommand } from "./embedded-driver.js";
+import { HostCapability, HostCallbackContext, callbackFailure, freezeCallbackJson, type HostCapabilitySnapshot } from "./embedded-callbacks.js";
+import { HOST_CALLBACK_OWNER, MAX_TIMER_DELAY_MS, checkEmbeddedCallbackWait, completion, observe, type Completion } from "./embedded-observation.js";
 import { decodeEmbeddedJson, encodeEmbeddedJson } from "./embedded-json.js";
 import { EmbeddedResultReleaseError, EmbeddedRuntimeError, EmbeddedTransport, EmbeddedTransportError } from "./embedded-transport.js";
 import { EMBEDDED_PROTOCOL_VERSION, EmbeddedNativeStatus, type EmbeddedJsonValue, type EmbeddedRuntimeResponseMap, type InputCommand, type InputHostCompletion, type OutputHostRequest, type OutputRuntimeSnapshot } from "./embedded-contract.js";
@@ -83,9 +84,6 @@ type RuntimeOperation = Extract<InputCommand, { type: "runtime" }>["operation"];
 // A sequential coordinator owns one native receipt at a time on its independent control worker.
 // 顺序协调器在独立控制工作线程上每次拥有一个原生回执。
 const PUMP_NATIVE_RECEIPTS = 1;
-// Node timers accept at most this signed 32-bit delay without coercing it to a short timer.
-// Node 定时器至多接受此有符号 32 位延迟，超过后会转换为短定时器。
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
 // All declared fields are required data properties, never executable accessors.
 // 全部声明字段均为必需数据属性，绝不接受可执行访问器。
 const CONFIG_FIELDS = ["maxConcurrentHandlers", "maxPendingCommands", "pollIntervalMs"] as const;
@@ -133,6 +131,7 @@ export class EmbeddedCallbackPump {
    * 显式正数纯数据回调限制。
    */
   constructor(transport: EmbeddedTransport, runtimeId: string, config: CallbackPumpConfig) {
+    checkEmbeddedCallbackWait();
     if (config === null || typeof config !== "object" || types.isProxy(config)) throw new TypeError("Callback pump requires exactly three data limits");
     const descriptors = Object.getOwnPropertyDescriptors(config);
     if (Reflect.ownKeys(descriptors).length !== CONFIG_FIELDS.length || CONFIG_FIELDS.some((key) => !Object.hasOwn(descriptors, key) || !("value" in descriptors[key]))) throw new TypeError("Callback pump requires exactly three data limits");
@@ -269,7 +268,7 @@ export class EmbeddedCallbackPump {
   /** Reject operations that would wait for their own still-active callback.
    * 拒绝会等待自身仍活动回调的操作。 */
   private checkObserver(): void {
-    if (HOST_CALLBACK_OWNER.getStore() === this) throw new EmbeddedRuntimeError("unsupported", "A callback cannot wait for its own pump");
+    checkEmbeddedCallbackWait();
   }
 
   /** Publish an advisory wake without discarding any authoritative owned work.

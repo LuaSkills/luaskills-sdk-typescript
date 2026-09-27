@@ -69,15 +69,18 @@ export async function withRuntime(action, { driverConfig = null } = {}) {
     // Commands bind one exact runtime identity; no name-based lookup or fallback is involved.
     // 命令绑定一个精确运行时身份；不涉及名称查找或回退。
     const command = (operation) => transport.request({ type: "runtime", runtime_id: runtimeId, operation });
-    command({ type: "plugin_register", plugin_id: pluginId, config: Object.fromEntries(["max_registered_pools", "max_sessions", "max_resident_vms", "max_running_calls", "max_queued_calls", "max_queued_bytes", "max_operations"].map((key) => [key, limits[key]])) });
+    const pluginConfig = Object.fromEntries(["max_registered_pools", "max_sessions", "max_resident_vms", "max_running_calls", "max_queued_calls", "max_queued_bytes", "max_operations"].map((key) => [key, limits[key]]));
+    command({ type: "plugin_register", plugin_id: pluginId, config: pluginConfig });
     // Each pool carries an immutable source generation and explicit shared reuse policy.
     // 每个池携带不可变源码代次及显式公共复用策略。
-    const pool = (source) => command({ type: "pool_register", definition: { plugin_id: pluginId, generation: "typescript-generation-1", package_root: packageRoot, dependencies_file: "dependencies.yaml", workspace_root: null, cwd: null, mounts: {}, security_partition: "typescript-test", source, exports: [{ name: "call", input_schema: true, output_schema: true }] }, policy: { kind: "shared", min_resident_vms: 0, max_resident_vms: 2, max_running_calls: 2, max_queued_calls: 4, reuse: "reusable", serial: false, backend: "in_process", idle_ttl_ms: null, max_uses: null }, permissions: ["typescript.host"], execution_revision: "typescript-v1" }).pool_id;
+    const moduleDefinition = (source) => ({ plugin_id: pluginId, generation: "typescript-generation-1", package_root: packageRoot, dependencies_file: "dependencies.yaml", workspace_root: null, cwd: null, mounts: {}, security_partition: "typescript-test", source, exports: [{ name: "call", input_schema: true, output_schema: true }] });
+    const poolPolicy = { kind: "shared", min_resident_vms: 0, max_resident_vms: 2, max_running_calls: 2, max_queued_calls: 4, reuse: "reusable", serial: false, backend: "in_process", idle_ttl_ms: null, max_uses: null };
+    const pool = (source) => command({ type: "pool_register", definition: moduleDefinition(source), policy: poolPolicy, permissions: ["typescript.host"], execution_revision: "typescript-v1" }).pool_id;
     // Admission returns only an operation identity, never an inferred successful business result.
     // 入场仅返回操作身份，绝不推断业务结果成功。
     const submit = (poolId, argumentsValue) => command({ type: "call_submit", timeout_ms: 10000, call: { pool_id: poolId, export: "call", arguments: argumentsValue, context: { request_context: null, client_budget: null, tool_config: null } } }).operation_id;
     const terminal = (operationId) => poll(() => command({ type: "operation_status", operation_id: operationId }), (snapshot) => ["succeeded", "failed", "cancelled"].includes(snapshot.phase));
-    await action({ transport, driver, runtimeId, pluginId, command, pool, submit, terminal });
+    await action({ transport, driver, runtimeId, runtimeConfig: limits, pluginId, pluginConfig, moduleDefinition, poolPolicy, command, pool, submit, terminal });
   } finally {
     if (driver !== null) { await driver.releaseResults(); await driver.close(); }
     transport.releaseResults();

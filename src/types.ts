@@ -1,3 +1,5 @@
+import type { InputToolCacheConfig } from "./embedded-contract.js";
+
 /**
  * JSON value accepted by the LuaSkills JSON FFI surface.
  * LuaSkills JSON FFI 接口接受的 JSON 值。
@@ -20,7 +22,7 @@ export type ManagedRuntimeKind = "python" | "node";
  * Host-selected managed Python/Node Worker and persistent-session resource policy.
  * 宿主选择的受管 Python/Node Worker 与持久会话资源策略。
  */
-export interface LuaRuntimeManagedRuntimeConfig {
+export type LuaRuntimeManagedRuntimeConfig = {
   /**
    * Maximum live Workers for one exact environment and package-owner pool key.
    * 单个精确环境与包所有者池键允许的最大活动 Worker 数量。
@@ -155,7 +157,7 @@ export interface RuntimeSkillRoot {
  * Lua VM pool sizing options.
  * Lua 虚拟机池容量选项。
  */
-export interface LuaVmPoolConfig {
+export type LuaVmPoolConfig = {
   /**
    * Minimum warm VM count.
    * 最小保温虚拟机数量。
@@ -177,7 +179,7 @@ export interface LuaVmPoolConfig {
  * Runtime capability toggles exposed by the host.
  * 宿主暴露的运行时能力开关。
  */
-export interface LuaRuntimeCapabilityOptions {
+export type LuaRuntimeCapabilityOptions = {
   /**
    * Whether vulcan.runtime.skills is available inside Lua.
    * Lua 内是否可使用 vulcan.runtime.skills。
@@ -187,20 +189,20 @@ export interface LuaRuntimeCapabilityOptions {
    * Whether the managed io compatibility layer is injected into Lua runtimes.
    * 是否向 Lua 运行时注入托管 io 兼容层。
    */
-  enable_managed_io_compat?: boolean;
+  enable_managed_io_compat: boolean;
 }
 
 /**
  * Optional isolated run-lua pool configuration.
  * 可选隔离 run-lua 池配置。
  */
-export interface LuaRuntimeRunLuaPoolConfig extends LuaVmPoolConfig {}
+export type LuaRuntimeRunLuaPoolConfig = LuaVmPoolConfig;
 
 /**
  * Space controller options used by database providers.
  * 数据库 provider 使用的空间控制器选项。
  */
-export interface LuaRuntimeSpaceControllerOptions {
+export type LuaRuntimeSpaceControllerOptions = {
   /**
    * Optional endpoint override.
    * 可选端点覆盖。
@@ -262,7 +264,7 @@ export interface LuaRuntimeSpaceControllerOptions {
  * Host options forwarded to LuaSkills engine creation.
  * 转发给 LuaSkills 引擎创建流程的宿主选项。
  */
-export interface LuaRuntimeHostOptions {
+export type LuaRuntimeHostOptions = {
   /**
    * Canonical runtime root used to derive the fixed LuaSkills layout.
    * 用于推导固定 LuaSkills 布局的规范 runtime root。
@@ -407,7 +409,7 @@ export interface LuaRuntimeHostOptions {
    * Optional cache configuration object.
    * 可选缓存配置对象。
    */
-  cache_config: JsonValue | null;
+  cache_config: LuaToolCacheConfig | null;
   /**
    * Optional isolated run-lua pool configuration.
    * 可选隔离 run-lua 池配置。
@@ -431,10 +433,26 @@ export interface LuaRuntimeHostOptions {
 }
 
 /**
+ * Cache configuration derived from the core contract, restricted to legacy JSON numeric values.
+ * 从核心契约派生的缓存配置，仅接受旧 JSON 接口支持的数字值。
+ */
+export type LuaToolCacheConfig = {
+  /** Default TTL when the caller omits it, in seconds.
+   * 调用方省略时采用的默认 TTL，单位秒。 */
+  default_ttl_secs: Extract<InputToolCacheConfig["default_ttl_secs"], number>;
+  /** Maximum retained cache entry count.
+   * 保留缓存条目的数量上限。 */
+  max_entries: Extract<InputToolCacheConfig["max_entries"], number>;
+  /** Maximum TTL accepted from a caller, in seconds.
+   * 接受调用方 TTL 的上限，单位秒。 */
+  max_ttl_secs: Extract<InputToolCacheConfig["max_ttl_secs"], number>;
+};
+
+/**
  * Engine creation options accepted by the JSON FFI.
  * JSON FFI 接受的引擎创建选项。
  */
-export interface LuaEngineOptions {
+export type LuaEngineOptions = {
   /**
    * Main VM pool config.
    * 主虚拟机池配置。
@@ -1703,7 +1721,14 @@ export interface LuaSkillsClientOptions extends LuaSkillsSdkOptions {
    * Partial host option overrides merged over SDK defaults.
    * 覆盖 SDK 默认值的部分宿主选项。
    */
-  hostOptions?: Partial<LuaRuntimeHostOptions>;
+  hostOptions?: Partial<Omit<LuaRuntimeHostOptions, "space_controller" | "capabilities">> & {
+    /** Partial controller policy merged over the existing SDK defaults.
+     * 覆盖现有 SDK 默认值的部分控制器策略。 */
+    space_controller?: Partial<LuaRuntimeSpaceControllerOptions>;
+    /** Partial capability toggles merged over the existing SDK defaults.
+     * 覆盖现有 SDK 默认值的部分能力开关。 */
+    capabilities?: Partial<LuaRuntimeCapabilityOptions>;
+  };
   /**
    * Partial VM pool overrides merged over SDK defaults.
    * 覆盖 SDK 默认值的部分虚拟机池选项。

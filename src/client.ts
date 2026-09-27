@@ -19,7 +19,6 @@ import {
   type ManagedRuntimeInstallDescriptor,
   type ManagedRuntimeResolveOptions,
   type RuntimeLeaseCreateOptions,
-  type LuaRuntimeCapabilityOptions,
   type LuaRuntimeHostOptions,
   type LuaRuntimeManagedRuntimeConfig,
   type LuaRuntimeSpaceControllerOptions,
@@ -58,18 +57,7 @@ import {
  * Partial nested host options accepted by SDK defaults.
  * SDK 默认值接受的部分嵌套宿主选项。
  */
-type HostOptionsOverride = Partial<Omit<LuaRuntimeHostOptions, "space_controller" | "capabilities">> & {
-  /**
-   * Partial space-controller option overrides.
-   * 部分 space-controller 选项覆盖。
-   */
-  space_controller?: Partial<LuaRuntimeSpaceControllerOptions>;
-  /**
-   * Partial runtime capability overrides.
-   * 部分运行时能力选项覆盖。
-   */
-  capabilities?: Partial<LuaRuntimeCapabilityOptions>;
-};
+type HostOptionsOverride = NonNullable<LuaSkillsClientOptions["hostOptions"]>;
 
 /**
  * Private constructor token that prevents direct JavaScript construction of SDK clients.
