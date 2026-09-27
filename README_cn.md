@@ -10,6 +10,16 @@ TypeScript / Node.js SDK，用于通过公共 JSON FFI 接入 LuaSkills 运行�
 
 SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正式 skill root、带权限语义的管理调用、skill config、provider callback、宿主工具 callback 与 runtime 资产安装。宿主在常规集成中不需要手写底层 FFI buffer 或 JSON 包络。
 
+## 嵌入式运行时契约（开发中）
+
+`embeddedContract` 导出生成的请求／响应类型、逐命令响应映射及精确契约摘要。包内 `contracts/embedded/v1/` 复制自正在开发的核心，输入与输出类型分别反映 Rust 反序列化和序列化规则。`EmbeddedNativeStatus` 也从包顶层导出。这是开发契约，现有已发布的 0.5.7 原生库不提供新增嵌入式运行时 API；TypeScript 原生传输、异步命令驱动及回调泵仍在实施。
+
+宽整数使用 `EmbeddedInteger`（`number | bigint`），超出 JavaScript 安全整数范围时，调用方必须使用 `bigint`。这里提供线形状声明，尚不是编码器：不能把 bigint 值直接传给普通 `JSON.stringify`。运行时数值校验、授权和生命周期规则仍由核心负责。显式 JSON 空值与省略可选字段使用不同类型；建议消费者启用 `strict` 和 `exactOptionalPropertyTypes`。
+
+执行 `npm run generate:embedded-contract` 可完全离线重新生成；`node scripts/generate-embedded-contract.mjs --check` 只读比较。显式同步新核心产物时使用 `--source <path/to/contract.json>`，相邻摘要和 README 必须存在。未知 Schema、重复 JSON 成员、缺失局部引用、冲突输出定义、标识符冲突及命令覆盖漂移均使生成失败。npm 包包含生成器及完整契约，不依赖开发机仓库路径。
+
+`npm pack` 在构建前检查生成文件。针对该精确本地产物执行 `node scripts/verify-embedded-distribution.mjs <archive.tgz>`，可比较嵌入式成员字节，在新进程导入包内编译契约，并运行独立生成器。此开发验证器需要系统 `tar` 命令；普通离线生成只需 Node.js。契约 CI 覆盖 Linux、Windows、macOS 上的 Node 24／26，不代表原生嵌入式运行时验收。
+
 ## 安装
 
 0.5.7 SDK 要求 Node.js 24 LTS 或更高版本。

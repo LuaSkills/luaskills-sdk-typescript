@@ -10,6 +10,16 @@ TypeScript / Node.js SDK for integrating the LuaSkills runtime through the publi
 
 The SDK wraps native library loading, JSON FFI buffers, engine lifecycle, formal skill roots, authority-aware management calls, skill config, provider callbacks, host-tool callbacks, and runtime asset installation. Hosts should not need to hand-write low-level FFI buffers or JSON envelopes for normal integration.
 
+## Embedded runtime contract (development)
+
+`embeddedContract` exports generated request/response types, per-command response maps and the exact contract digest. The checked-in `contracts/embedded/v1/` directory is copied from the developing core, with independent input and output types reflecting Rust deserialization and serialization rules. `EmbeddedNativeStatus` is also exported at package level. This is a development contract; the existing published 0.5.7 native libraries do not provide the new embedded runtime API. The TypeScript native transport, asynchronous command driver and callback pump are still being implemented.
+
+Wide integer fields use `EmbeddedInteger` (`number | bigint`); callers must use `bigint` outside JavaScript's safe integer range. These are wire shape declarations, not an encoder: do not pass bigint values to ordinary `JSON.stringify`. Runtime numeric validation, authorization and lifecycle rules remain core responsibilities. Explicit JSON null and an omitted optional property have distinct types. Use `strict` and `exactOptionalPropertyTypes` for consumer checks.
+
+Run `npm run generate:embedded-contract` to regenerate entirely offline, or `node scripts/generate-embedded-contract.mjs --check` to compare without writing. To explicitly synchronize a new core artifact, use `--source <path/to/contract.json>`; its adjacent digest and README must be present. Unknown schema constructs, duplicate JSON members, missing local references, conflicting output definitions, identifier collisions and command coverage drift stop generation. The generator and complete contract are included in the npm package; no developer-machine repository path is needed.
+
+`npm pack` checks the generated files before building. Run `node scripts/verify-embedded-distribution.mjs <archive.tgz>` against that exact local artifact to compare embedded member bytes, import its compiled contract in a fresh process, and run its standalone generator. This development verifier requires the system `tar` command; ordinary offline generation requires only Node.js. The contract CI covers Node 24/26 on Linux, Windows and macOS; it does not constitute native embedded runtime acceptance.
+
 ## Installation
 
 The 0.5.7 SDK requires Node.js 24 LTS or newer.

@@ -17,6 +17,8 @@
     "scripts/ffi/*.ps1",
     "scripts/ffi/*.sh",
     "scripts/debug-tools/*.py",
+    "scripts/generate-embedded-contract.mjs",
+    "scripts/verify-embedded-distribution.mjs",
     "src",
     "README.md",
     "README_cn.md",
@@ -25,8 +27,9 @@
   "scripts": {
     "clean": "node scripts/clean-dist.mjs",
     "generate:config-contract": "node scripts/generate-skill-config-contract.mjs",
+    "generate:embedded-contract": "node scripts/generate-embedded-contract.mjs",
     "build": "npm run clean && tsc -p tsconfig.json",
-    "check": "node scripts/generate-skill-config-contract.mjs --check && tsc -p tsconfig.json --noEmit",
+    "check": "node scripts/generate-skill-config-contract.mjs --check && node scripts/generate-embedded-contract.mjs --check && tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node tests/run-all.mjs",
     "test:private-url-manifest": "npm run build && node tests/private-url-manifest.mjs",
     "test:runtime-lease-actions": "npm run build && node tests/runtime-lease-actions.mjs",
@@ -48,7 +51,7 @@
     "example:provider-callback": "node examples/provider-callback.mjs",
     "example:query": "node examples/query.mjs",
     "example:runtime-lease": "node examples/runtime-lease.mjs",
-    "prepack": "npm run build"
+    "prepack": "npm run check && npm run build"
   },
   "keywords": [
     "lua",

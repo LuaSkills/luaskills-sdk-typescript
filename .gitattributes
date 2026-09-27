@@ -1,0 +1,5 @@
+# Preserve hashed contracts and reproducible generated source byte-for-byte.
+# 逐字节保留带摘要契约和可复现的生成源码。
+contracts/embedded/v1/* text eol=lf
+src/embedded-contract.ts text eol=lf
+scripts/generate-embedded-contract.mjs text eol=lf

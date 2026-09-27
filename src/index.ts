@@ -46,5 +46,9 @@ export {
 } from "./ffi.js";
 export { RuntimeRoots } from "./roots.js";
 export * from "./config-contract.js";
+// Keep the embedded wire type namespace separate from the legacy SDK types.
+// 将嵌入式线类型命名空间与旧版 SDK 类型分开。
+export * as embeddedContract from "./embedded-contract.js";
+export { EmbeddedNativeStatus } from "./embedded-contract.js";
 export * from "./runtime-assets.js";
 export * from "./types.js";
