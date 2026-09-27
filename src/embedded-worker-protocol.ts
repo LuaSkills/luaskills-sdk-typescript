@@ -11,6 +11,9 @@ export interface EmbeddedWorkerConfig {
   /** Exact resolved library path.
    * 精确已解析动态库路径。 */
   readonly libraryPath: string;
+  /** Opaque equality token for the owner's still-loaded module, never a dereferenceable address.
+   * 所有者仍加载模块的不透明相等性标识，绝非可解引用地址。 */
+  readonly bindingIdentity: string;
   /** Exact transport identity; workers never create or free it.
    * 精确传输身份；工作线程绝不创建或释放它。 */
   readonly transportId: bigint;
@@ -26,6 +29,7 @@ export interface EmbeddedWorkerConfig {
  * 显式序列化错误证据；任意 Error 子类不能经结构化克隆完整保留。
  */
 export type EmbeddedWorkerError =
+  | { readonly kind: "compatibility"; readonly message: string }
   | { readonly kind: "transport"; readonly functionName: string; readonly status: number | null; readonly message: string }
   | { readonly kind: "release"; readonly status: number | null; readonly message: string; readonly responseBytes: Uint8Array | null }
   | { readonly kind: "binding"; readonly message: string };

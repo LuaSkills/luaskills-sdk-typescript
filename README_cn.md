@@ -12,7 +12,11 @@ SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正
 
 ## 嵌入式运行时契约（开发中）
 
-`embeddedContract` 导出生成的请求／响应类型、逐命令响应映射及精确契约摘要。包内 `contracts/embedded/v1/` 复制自正在开发的核心，输入与输出类型分别反映 Rust 反序列化和序列化规则。`EmbeddedNativeStatus` 也从包顶层导出。这是开发契约，现有已发布的 0.5.7 原生库不提供新增嵌入式运行时 API。`EmbeddedTransport` 已向显式选择的匹配库绑定五个新 C 导出；异步命令驱动已接通固定工作线程；自动回调泵已接通；高级生命周期接口仍在实施。
+`embeddedContract` 导出生成的请求／响应类型、逐命令响应映射及精确契约摘要。包内 `contracts/embedded/v1/` 复制自正在开发的核心，输入与输出类型分别反映 Rust 反序列化和序列化规则。`EmbeddedNativeStatus` 也从包顶层导出。这是开发契约，现有已发布的 0.5.7 原生库不提供新增嵌入式运行时 API。`EmbeddedTransport` 向显式选择的匹配库绑定一个只读发现导出及五个传输导出。固定命令工作线程、自动回调泵、类型句柄及协调生命周期作用域均已实现；完整持久恢复仍属于后续里程碑。
+
+原生分配前，`EmbeddedTransport` 复制由动态库拥有且长度有界的 `luaskills_ffi_embedded_describe_v1` 字节，检查精确核心、协议、ABI 和描述版本、包内契约摘要、必需命令／能力、支持的后端、进程系统及指针位宽。缺少发现入口或元数据不兼容抛出 `EmbeddedCompatibilityError`；原生状态失败仍为 `EmbeddedTransportError`。借用描述字节绝不能交给结果释放函数。`coreDescription` 返回独立类型快照，释放后仍可读取。构建输入摘要仅描述选定输入，不认证二进制，也不证明完整封闭构建。
+
+工作线程在就绪前检查同样的元数据，并比较由稳定的库内描述地址和精确描述字节派生的进程内不透明绑定标记。匹配核心保证该地址在库保持加载时稳定，因此拥有独立原生注册表的同内容库副本不能借用另一加载实例的传输 ID。标记仅用于进程内相等性检查，不是认证凭证或发布身份。传输保留动态库，直到工作线程实际退出且原生所有权释放；其 `libraryPath` 只读。宿主须使用不可变版本资产路径，在替换或卸载资产前完成旧实例清理。启动兼容错误经线程消息保留为 `EmbeddedCompatibilityError`，所有权声明仍等待实际线程退出才归还。
 
 宽整数使用 `EmbeddedInteger`（`number | bigint`），超出 JavaScript 安全整数范围时必须使用 `bigint`。`encodeEmbeddedJson(value, maxBytes)` 和 `decodeEmbeddedJson(bytes)` 完整保留有符号／无符号 64 位整数，不将数字变成字符串。不安全的普通整数 number 会被拒绝：精确整数使用 `bigint`，包括 `1e100` 在内的显式有限浮点数使用 `new EmbeddedFloat(value)`。整数形浮点词元解码为 `EmbeddedFloat`（通过 `.value` 读取）；有小数部分的词元解码为普通 number，负零保持不变。不能对这些值使用普通 `JSON.stringify`。运行时授权和生命周期规则仍由核心负责；显式 JSON 空值与省略字段使用不同类型。建议启用 `strict` 和 `exactOptionalPropertyTypes`。
 

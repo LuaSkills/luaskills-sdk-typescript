@@ -18,6 +18,7 @@ const testFiles = [
   "embedded-contract.mjs",
   "embedded-json.mjs",
   "embedded-json-vectors.mjs",
+  "embedded-compatibility.mjs",
   "embedded-native.mjs",
   "embedded-driver.mjs",
   "embedded-worker.mjs",

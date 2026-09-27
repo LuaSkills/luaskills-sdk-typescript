@@ -3,8 +3,8 @@ import { bindEmbeddedNative } from "./embedded-transport.js";
 import { errorEvidence, serveEmbeddedWorker } from "./embedded-worker-runtime.js";
 import type { EmbeddedWorkerConfig, EmbeddedWorkerReply } from "./embedded-worker-protocol.js";
 
-// Startup binds functions only. No native command may run before the parent receives ready.
-// 启动仅绑定函数；父线程收到 ready 之前不得运行任何原生命令。
+// Startup validates read-only native metadata and the owner's module identity before accepting commands.
+// 启动在接受命令前校验只读原生元数据及所有者模块身份。
 try {
   if (parentPort === null) throw new Error("Embedded worker requires a parent port");
   // Only the parent provides this immutable configuration before native ownership is borrowed.

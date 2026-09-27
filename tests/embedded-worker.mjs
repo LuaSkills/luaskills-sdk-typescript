@@ -20,7 +20,7 @@ const native = { skip: !process.env.LUASKILLS_LIB };
  * 精确不可变启动字段。
  */
 function configuration(transport) {
-  return { libraryPath: transport.libraryPath, transportId: transport.transportId, maxRequestBytes: transport.config.max_request_bytes, maxResponseBytes: transport.config.max_response_bytes };
+  return { libraryPath: transport.libraryPath, bindingIdentity: transport.bindingIdentity, transportId: transport.transportId, maxRequestBytes: transport.config.max_request_bytes, maxResponseBytes: transport.config.max_response_bytes };
 }
 
 for (const failure of ["status", "throw"]) {

@@ -140,14 +140,16 @@ test("command encoding avoids accessors and async-hook reentrancy cannot exceed 
 test("binding startup failure joins unused workers and preserves the borrowed transport", native, async () => {
   const transport = new EmbeddedTransport(budgets);
   const original = transport.libraryPath;
-  transport.libraryPath = original + ".intentionally-missing";
+  // Deliberately shadow a read-only getter only at this test boundary to inject worker loading failure.
+  // 仅在此测试边界刻意遮蔽只读 getter，注入工作线程加载失败。
+  Object.defineProperty(transport, "libraryPath", { value: original + ".intentionally-missing", configurable: true });
   const driver = new EmbeddedCommandDriver(transport, limits);
   try {
     await assert.rejects(driver.ready(), /load|find|open|module/i);
     await driver.close();
     assert.equal(driver.status.closed, true);
     assert.equal(transport.request({ type: "describe" }).protocol_version, 1);
-  } finally { transport.libraryPath = original; await driver.close(); transport.close(); transport.free(); }
+  } finally { delete transport.libraryPath; await driver.close(); transport.close(); transport.free(); }
 });
 
 test("native and business failures keep distinct identities across worker messages", native, async () => {

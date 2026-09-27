@@ -1,8 +1,10 @@
 import { constants as bufferConstants } from "node:buffer";
+import { createHash } from "node:crypto";
 import { EMBEDDED_CONTROL_WORKERS } from "./embedded-worker-protocol.js";
 import koffi from "koffi";
 import { resolveLibraryPath } from "./ffi.js";
-import { EMBEDDED_PROTOCOL_VERSION, EmbeddedNativeStatus, type EmbeddedInteger, type EmbeddedJsonValue, type InputCommand } from "./embedded-contract.js";
+import { EMBEDDED_DESCRIPTION_MAX_BYTES, EMBEDDED_PROTOCOL_VERSION, EmbeddedNativeStatus, type EmbeddedInteger, type EmbeddedJsonValue, type InputCommand, type OutputCoreDescription } from "./embedded-contract.js";
+import { decodeCoreDescription, EmbeddedCompatibilityError } from "./embedded-compatibility.js";
 import { decodeEmbeddedJson, embeddedUnsignedInteger, encodeEmbeddedJson } from "./embedded-json.js";
 
 /** Explicit transport budgets, including retained and currently executing ownership.
@@ -61,6 +63,12 @@ const LIVE_TRANSPORTS = new Set<EmbeddedTransport>();
 /** Shared exact ABI bindings used by the owner and its borrowed worker threads.
  * 所有者及其借用工作线程共用的精确 ABI 绑定。 */
 export interface EmbeddedNativeBindings {
+  /** Copied bootstrap bytes, independent of library-owned storage.
+   * 复制的引导字节，独立于动态库拥有的存储。 */
+  readonly descriptionBytes: Buffer;
+  /** Process-local equality token for this live module instance; never a release identity or native pointer.
+   * 此活动模块实例的进程内相等性标识；绝非发布身份或原生指针。 */
+  readonly bindingIdentity: string;
   /** Library reference retained until all native usage ends.
    * 保留到全部原生使用结束的动态库引用。 */
   readonly library: koffi.IKoffiLib;
@@ -90,9 +98,30 @@ export interface EmbeddedNativeBindings {
  * 保留动态库引用的不可变绑定。
  */
 export function bindEmbeddedNative(libraryPath: string): EmbeddedNativeBindings {
+  // Keep the loaded library strongly reachable while copying its borrowed bootstrap bytes.
+  // 复制动态库的借用引导字节时保持已加载库强可达。
   const library = koffi.load(libraryPath);
+  let describe: (output: { ptr: unknown; len: number | bigint }) => number;
+  try { describe = library.func("luaskills_ffi_embedded_describe_v1", "int32_t", [koffi.out(koffi.pointer(BORROWED_TYPE))]); }
+  catch (cause) { throw new EmbeddedCompatibilityError("Native core lacks luaskills_ffi_embedded_describe_v1", { cause }); }
+  const borrowed: { ptr: unknown; len: number | bigint } = { ptr: null, len: 0 };
+  const status = describe(borrowed);
+  if (status !== EmbeddedNativeStatus.OK) throw new EmbeddedTransportError("luaskills_ffi_embedded_describe_v1", status);
+  let length: bigint;
+  try { length = embeddedUnsignedInteger(borrowed.len, "description length"); }
+  catch (cause) { throw new EmbeddedCompatibilityError("Invalid native core description length", { cause }); }
+  if (borrowed.ptr === null || length === 0n || length > BigInt(EMBEDDED_DESCRIPTION_MAX_BYTES)) throw new EmbeddedCompatibilityError("Invalid native core description buffer");
+  const address = koffi.address(borrowed.ptr);
+  if (address === 0n) throw new EmbeddedCompatibilityError("Invalid native core description address");
+  const descriptionBytes = Buffer.from(koffi.decode(borrowed.ptr, "uint8_t", Number(length)) as Uint8Array);
+  decodeCoreDescription(descriptionBytes, koffi.sizeof("void *"));
+  // Core tests guarantee a stable library-owned descriptor address until unload; equal file bytes cannot distinguish separate native registries.
+  // 核心测试保证描述地址在卸载前由库拥有且保持稳定。仅比较文件字节无法区分拥有独立传输表的两个模块。
+  // Hash the address and exact bytes into an equality-only token; never send dereferenceable pointers.
+  // 将地址及精确字节摘要为仅供相等性比较的标识；绝不发送可解引用指针。
+  const bindingIdentity = createHash("sha256").update("luaskills-node-binding-v1\0").update(address.toString(16)).update("\0").update(descriptionBytes).digest("hex");
   return Object.freeze({
-    library,
+    library, descriptionBytes, bindingIdentity,
     create: library.func("luaskills_ffi_embedded_transport_new_v1", "int32_t", [koffi.pointer(CONFIG_TYPE), koffi.out(koffi.pointer("uint64_t"))]),
     close: library.func("luaskills_ffi_embedded_transport_close_v1", "int32_t", ["uint64_t"]),
     free: library.func("luaskills_ffi_embedded_transport_free_v1", "int32_t", ["uint64_t"]),
@@ -242,7 +271,11 @@ export function decodeEmbeddedResponse(bytes: Uint8Array): EmbeddedJsonValue {
 export class EmbeddedTransport {
   /** Resolved authoritative library path, retained for diagnostics.
    * 已解析的权威动态库路径，保留用于诊断。 */
-  readonly libraryPath: string;
+  readonly #libraryPath: string;
+  // Private immutable copies keep diagnostics and worker admission independent of caller mutation.
+  // 私有不可变副本使诊断及工作线程入场独立于调用方修改。
+  readonly #descriptionBytes: Buffer;
+  readonly #bindingIdentity: string;
   // Actual dynamic library owner and exact ABI bindings remain strongly reachable until native release.
   // 实际动态库所有者及精确 ABI 绑定保持强可达，直到原生释放。
   private readonly library: koffi.IKoffiLib;
@@ -285,8 +318,8 @@ export class EmbeddedTransport {
   private commandSlots = 0;
 
   /**
-   * Bind all five exports before allocating ownership with explicit validated budgets.
-   * 在以显式已校验预算分配所有权前绑定全部五个导出。
+   * Validate the core bootstrap and bind all transport exports before allocating native ownership.
+   * 分配原生所有权前校验核心引导信息并绑定全部传输导出。
    * @param config Exact positive transport limits.
    * 精确正数传输限制。
    * @param options Existing SDK library selection, with no protocol fallback.
@@ -305,8 +338,10 @@ export class EmbeddedTransport {
     }
     if (normalized.max_response_bytes > normalized.max_result_bytes) throw new RangeError("max_response_bytes exceeds max_result_bytes");
     this.budgets = Object.freeze(normalized);
-    this.libraryPath = resolveLibraryPath(options.libraryPath, options.runtimeRoot);
+    this.#libraryPath = resolveLibraryPath(options.libraryPath, options.runtimeRoot);
     const native = bindEmbeddedNative(this.libraryPath);
+    this.#descriptionBytes = Buffer.from(native.descriptionBytes);
+    this.#bindingIdentity = native.bindingIdentity;
     this.library = native.library;
     this.nativeNew = native.create;
     this.nativeClose = native.close;
@@ -327,6 +362,18 @@ export class EmbeddedTransport {
   /** Return a frozen snapshot of retained owners, including failed construction with uncertain publication.
    * 返回保留所有者的冻结快照，包含构造失败且发布结果不确定的实例。 */
   static get live(): readonly EmbeddedTransport[] { return Object.freeze([...LIVE_TRANSPORTS]); }
+
+  /** Return the constructor-selected library path; workers cannot be redirected by assignment.
+   * 返回构造时选定的动态库路径；不能通过赋值重定向工作线程。 */
+  get libraryPath(): string { return this.#libraryPath; }
+
+  /** Return an independent typed snapshot without issuing a native request.
+   * 返回独立类型化快照，不发起原生请求。 */
+  get coreDescription(): OutputCoreDescription { return decodeCoreDescription(this.#descriptionBytes, koffi.sizeof("void *")); }
+
+  /** @internal Return an opaque process-local equality token while this transport retains its library.
+   * 返回不透明进程内相等性标识，此传输同时保留所属动态库。 */
+  get bindingIdentity(): string { return this.#bindingIdentity; }
 
   /** Return immutable normalized bigint budgets.
    * 返回不可变的规范化 bigint 预算。 */

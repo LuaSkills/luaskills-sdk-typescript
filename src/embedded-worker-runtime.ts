@@ -1,4 +1,5 @@
 import type { MessagePort } from "node:worker_threads";
+import { EmbeddedCompatibilityError } from "./embedded-compatibility.js";
 import { requestEmbeddedNative, EmbeddedResultReleaseError, EmbeddedTransportError, type NativeResult, type EmbeddedNativeBindings } from "./embedded-transport.js";
 import { EmbeddedNativeStatus } from "./embedded-contract.js";
 import { EMBEDDED_WORKER_ERROR_CHARS, type EmbeddedWorkerConfig, type EmbeddedWorkerError, type EmbeddedWorkerReply, type EmbeddedWorkerRequest } from "./embedded-worker-protocol.js";
@@ -13,6 +14,7 @@ import { EMBEDDED_WORKER_ERROR_CHARS, type EmbeddedWorkerConfig, type EmbeddedWo
  */
 export function errorEvidence(error: unknown): EmbeddedWorkerError {
   const message = (error instanceof Error ? `${error.name}: ${error.message}` : String(error)).slice(0, EMBEDDED_WORKER_ERROR_CHARS);
+  if (error instanceof EmbeddedCompatibilityError) return { kind: "compatibility", message };
   if (error instanceof EmbeddedResultReleaseError) {
     const bytes = error.responseBytes;
     return { kind: "release", status: error.status, message, responseBytes: bytes === null ? null : Uint8Array.from(bytes) };
@@ -34,6 +36,9 @@ export function errorEvidence(error: unknown): EmbeddedWorkerError {
  * 无返回值；消息端口保留此执行上下文直到正常关闭。
  */
 export function serveEmbeddedWorker(config: EmbeddedWorkerConfig, port: MessagePort, native: EmbeddedNativeBindings): void {
+  // Reject a second module before installing any command listener or announcing readiness.
+  // 在安装任何命令监听器或宣布就绪之前拒绝第二个模块。
+  if (typeof config.bindingIdentity !== "string" || !/^[0-9a-f]{64}$/.test(config.bindingIdentity) || config.bindingIdentity !== native.bindingIdentity) throw new EmbeddedCompatibilityError("Embedded worker loaded a different native module instance");
   const results = new Map<bigint, Readonly<NativeResult>>();
   let stopping = false;
 

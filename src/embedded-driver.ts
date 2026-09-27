@@ -1,5 +1,6 @@
 import { AsyncResource } from "node:async_hooks";
 import { Worker } from "node:worker_threads";
+import { EmbeddedCompatibilityError } from "./embedded-compatibility.js";
 import { types } from "node:util";
 import { EMBEDDED_PROTOCOL_VERSION, type EmbeddedJsonValue, type InputCommand } from "./embedded-contract.js";
 import { decodeEmbeddedJson, encodeEmbeddedJson } from "./embedded-json.js";
@@ -34,6 +35,7 @@ export interface EmbeddedCommandDriverConfig {
  * 本地 SDK 错误，在可用时保留已复制交付字节。
  */
 function restoreError(evidence: EmbeddedWorkerError): Error {
+  if (evidence.kind === "compatibility") return new EmbeddedCompatibilityError(evidence.message);
   if (evidence.kind === "release") return new EmbeddedResultReleaseError(evidence.status, evidence.responseBytes === null ? null : Buffer.from(evidence.responseBytes), new Error(evidence.message));
   if (evidence.kind === "transport") return new EmbeddedTransportError(evidence.functionName, evidence.status);
   return new Error(evidence.message);
@@ -217,7 +219,7 @@ class EmbeddedCommandExecutor {
       : ownership.kind === "callback" ? transport.claimCallbackPump(ownership.runtimeId, this)
       : transport.claimRuntimeScope(ownership.runtimeId, this, ownership.pump);
     LIVE_EXECUTORS.add(this);
-    const workerData: EmbeddedWorkerConfig = { libraryPath: transport.libraryPath, transportId: identity, maxRequestBytes: transport.config.max_request_bytes, maxResponseBytes: transport.config.max_response_bytes };
+    const workerData: EmbeddedWorkerConfig = { libraryPath: transport.libraryPath, bindingIdentity: transport.bindingIdentity, transportId: identity, maxRequestBytes: transport.config.max_request_bytes, maxResponseBytes: transport.config.max_response_bytes };
     try {
       for (let index = 0; index < this.limits.workThreads + EMBEDDED_CONTROL_WORKERS; index += 1) {
         // Packaged worker code has no application preload hooks and never receives shared Buffer pool storage.
