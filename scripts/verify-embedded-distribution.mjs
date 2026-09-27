@@ -23,6 +23,9 @@ export function verifyDistribution(archive) {
   // Only these explicitly declared files may be materialized under the isolated directory.
   // 仅可将这些显式声明文件落盘到隔离目录内。
   const expected = ["package.json", "contracts/embedded/v1/contract.json", "contracts/embedded/v1/contract.sha256", "contracts/embedded/v1/README.md", "scripts/generate-embedded-contract.mjs", "scripts/verify-embedded-distribution.mjs", "src/embedded-contract.ts", "dist/embedded-contract.js", "dist/embedded-contract.d.ts", "dist/embedded-contract.js.map", "src/index.ts", "dist/index.js", "dist/index.d.ts"];
+  // Public value types stay independent of Node globals; codec and transport artifacts are checked separately.
+  // 公开值类型保持独立于 Node 全局；编码器和传输产物分别校验。
+  for (const name of ["embedded-value", "embedded-json", "embedded-transport"]) expected.push(`src/${name}.ts`, `dist/${name}.js`, `dist/${name}.d.ts`, `dist/${name}.js.map`);
   const temporary = mkdtempSync(join(tmpdir(), "luaskills-embedded-npm-"));
   try {
     for (const relative of expected) {
@@ -48,6 +51,12 @@ assert.deepEqual(contract.EMBEDDED_RUNTIME_COMMANDS, document.runtime_commands);
 assert.ok(Object.isFrozen(contract.EMBEDDED_ROOT_COMMANDS));
 assert.ok(Object.isFrozen(contract.EmbeddedNativeStatus));`;
     execFileSync(process.execPath, ["--input-type=module", "-e", check, pathToFileURL(join(temporary, "dist/embedded-contract.js")).href], { cwd: temporary, stdio: "pipe" });
+    // The codec executes from the actual package without loading Koffi or borrowing repository modules.
+    // 编码器从实际包执行，不加载 Koffi，也不借用仓库模块。
+    const codecCheck = `import assert from 'node:assert/strict'; const codec = await import(process.argv[1]);
+const value = { integer: 18446744073709551615n, float: new codec.EmbeddedFloat(1e100), empty: null };
+assert.deepEqual(codec.decodeEmbeddedJson(codec.encodeEmbeddedJson(value, 4096)), value);`;
+    execFileSync(process.execPath, ["--input-type=module", "-e", codecCheck, pathToFileURL(join(temporary, "dist/embedded-json.js")).href], { cwd: temporary, stdio: "pipe" });
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

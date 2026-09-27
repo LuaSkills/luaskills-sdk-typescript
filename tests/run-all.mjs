@@ -16,6 +16,8 @@ const testFiles = [
   "skill-package-config.mjs",
   "skill-config-contract.mjs",
   "embedded-contract.mjs",
+  "embedded-json.mjs",
+  "embedded-native.mjs",
   "skill-config-native-e2e.mjs",
   "skill-operation-progress-callback.mjs",
   "system-management-raw-call-boundary.mjs",

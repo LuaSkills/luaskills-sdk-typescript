@@ -50,5 +50,7 @@ export * from "./config-contract.js";
 // 将嵌入式线类型命名空间与旧版 SDK 类型分开。
 export * as embeddedContract from "./embedded-contract.js";
 export { EmbeddedNativeStatus } from "./embedded-contract.js";
+export { EmbeddedFloat, encodeEmbeddedJson, decodeEmbeddedJson } from "./embedded-json.js";
+export { EmbeddedTransport, EmbeddedTransportError, EmbeddedRuntimeError, EmbeddedResultReleaseError, type EmbeddedTransportConfig } from "./embedded-transport.js";
 export * from "./runtime-assets.js";
 export * from "./types.js";

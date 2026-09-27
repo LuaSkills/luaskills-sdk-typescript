@@ -12,9 +12,13 @@ SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正
 
 ## 嵌入式运行时契约（开发中）
 
-`embeddedContract` 导出生成的请求／响应类型、逐命令响应映射及精确契约摘要。包内 `contracts/embedded/v1/` 复制自正在开发的核心，输入与输出类型分别反映 Rust 反序列化和序列化规则。`EmbeddedNativeStatus` 也从包顶层导出。这是开发契约，现有已发布的 0.5.7 原生库不提供新增嵌入式运行时 API；TypeScript 原生传输、异步命令驱动及回调泵仍在实施。
+`embeddedContract` 导出生成的请求／响应类型、逐命令响应映射及精确契约摘要。包内 `contracts/embedded/v1/` 复制自正在开发的核心，输入与输出类型分别反映 Rust 反序列化和序列化规则。`EmbeddedNativeStatus` 也从包顶层导出。这是开发契约，现有已发布的 0.5.7 原生库不提供新增嵌入式运行时 API。`EmbeddedTransport` 已向显式选择的匹配库绑定五个新 C 导出；异步命令驱动、自动回调泵及高级生命周期接口仍在实施。
 
-宽整数使用 `EmbeddedInteger`（`number | bigint`），超出 JavaScript 安全整数范围时，调用方必须使用 `bigint`。这里提供线形状声明，尚不是编码器：不能把 bigint 值直接传给普通 `JSON.stringify`。运行时数值校验、授权和生命周期规则仍由核心负责。显式 JSON 空值与省略可选字段使用不同类型；建议消费者启用 `strict` 和 `exactOptionalPropertyTypes`。
+宽整数使用 `EmbeddedInteger`（`number | bigint`），超出 JavaScript 安全整数范围时必须使用 `bigint`。`encodeEmbeddedJson(value, maxBytes)` 和 `decodeEmbeddedJson(bytes)` 完整保留有符号／无符号 64 位整数，不将数字变成字符串。不安全的普通整数 number 会被拒绝：精确整数使用 `bigint`，包括 `1e100` 在内的显式有限浮点数使用 `new EmbeddedFloat(value)`。整数形浮点词元解码为 `EmbeddedFloat`（通过 `.value` 读取）；有小数部分的词元解码为普通 number，负零保持不变。不能对这些值使用普通 `JSON.stringify`。运行时授权和生命周期规则仍由核心负责；显式 JSON 空值与省略字段使用不同类型。建议启用 `strict` 和 `exactOptionalPropertyTypes`。
+
+`EmbeddedTransport` 要求五项完整正数预算：`max_runtimes`、`max_result_buffers`、`max_result_bytes`、`max_response_bytes`、`max_request_bytes`，内部保留不可变 bigint 副本，使用既有 SDK 的显式动态库选择。`request(command)` 为同步调用；初始化或原生等待不能阻塞负责回调的事件循环。`close()` 请求关闭入场；调用方仍须完成实际宿主确认、排空并移除各运行时，再调用 `free()`。核心拒绝后所有者仍可用于清理。终结器和垃圾回收不替代原生释放，`EmbeddedTransport.live` 提供强保留所有者的冻结快照。构造时绑定异常且发布无法确认会继续保留动态库，需要基础设施恢复，不能据此声称可安全卸载。
+
+结果字节先复制，再释放精确原生描述符。`EmbeddedResultReleaseError` 保留独立 `responseBytes` 副本；`deliveredResult()` 可恢复原有成功或业务错误，不重复执行命令。释放绑定抛异常时 `status === null` 并保留 `cause`，与实际数字 C 状态区分。`releaseResults()` 仅重试保留缓冲的释放，有活动读取者时拒绝，不重放业务。释放失败阻止传输 `free()`；复制证据缺失或无效时明确拒绝。编码会拒绝 getter、代理、序列化钩子、稀疏／带额外字段数组、undefined、非有限数和无效 Unicode，避免静默改变输入。
 
 执行 `npm run generate:embedded-contract` 可完全离线重新生成；`node scripts/generate-embedded-contract.mjs --check` 只读比较。显式同步新核心产物时使用 `--source <path/to/contract.json>`，相邻摘要和 README 必须存在。未知 Schema、重复 JSON 成员、缺失局部引用、冲突输出定义、标识符冲突及命令覆盖漂移均使生成失败。npm 包包含生成器及完整契约，不依赖开发机仓库路径。
 
