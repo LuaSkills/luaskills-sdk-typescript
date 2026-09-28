@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "005e4d84748b8a9d2ef970512f0f6bfb06cf97ed7ee5282e7c67c0653a3c4907" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "5b925a5e67d50a48a9545d57ce7119bbba9e9d46ccfc771bdc9dea2da974cc35" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -348,8 +348,8 @@ export type InputEmbeddedCall = ({
 });
 
 /**
- * Immutable capacity policy owned by one plugin across isolated module generations.
- * 单个插件跨隔离模块代次持有的不可变容量策略。
+ * Complete capacity policy owned by one plugin across isolated module generations.
+ * 单个插件跨隔离模块代次持有的完整容量策略。
  */
 export type InputEmbeddedCapacityConfig = ({
 /**
@@ -2255,8 +2255,8 @@ export type OutputEmbeddedBuildIdentity = ({
 } & Record<string, EmbeddedJsonValue>);
 
 /**
- * Immutable capacity policy owned by one plugin across isolated module generations.
- * 单个插件跨隔离模块代次持有的不可变容量策略。
+ * Complete capacity policy owned by one plugin across isolated module generations.
+ * 单个插件跨隔离模块代次持有的完整容量策略。
  */
 export type OutputEmbeddedCapacityConfig = ({
 /**
@@ -2302,8 +2302,8 @@ export type OutputEmbeddedCapacitySnapshot = ({
  */
 "committed_resident_vms": EmbeddedInteger;
 /**
- * Original complete policy, including physical and queued-work budgets.
- * 原完整策略，包含物理及排队工作预算。
+ * Current complete policy, including physical and queued-work budgets.
+ * 当前完整策略，包含物理及排队工作预算。
  */
 "config": OutputEmbeddedCapacityConfig;
 /**
