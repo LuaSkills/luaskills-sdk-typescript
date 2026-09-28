@@ -171,6 +171,13 @@ export class EmbeddedRuntime {
    * This does not retry a checkpoint or execute business work; request the original checkpoint retry separately.
    * 此操作不重试检查点或执行业务工作；需独立请求原检查点重试。 */
   recoverStorage(): EmbeddedPending<boolean> { return this.request({ type: "storage_recover" }, "work"); }
+  /** Rebuild one failed, actually exited writer on the work lane; false means a healthy running writer.
+   * 在工作通道重建一个已失败且实际退出的写入者；假表示健康运行写入者。
+   * Preserve old receipts and budgets; storage recovery and checkpoint retries remain separate actions.
+   * 保留旧回执及预算；存储恢复与检查点重试仍为独立操作。
+   * Explicit writer closure and unproven or poisoned ownership remain errors, never implicit reopening.
+   * 显式写入者关闭及未证实或中毒所有权保持错误，绝不隐式重新打开。 */
+  recoverStorageWorker(): EmbeddedPending<boolean> { return this.request({ type: "storage_worker_recover" }, "work"); }
   /** Read exact original historyRuntimeId/operationId on the work lane; null does not prove no execution occurred.
    * 在工作通道读取精确原始 historyRuntimeId/operationId；空值不证明从未执行。 */
   historyGet(historyRuntimeId: string, operationId: string): EmbeddedPending<wire.OutputJournalOperation | null> {

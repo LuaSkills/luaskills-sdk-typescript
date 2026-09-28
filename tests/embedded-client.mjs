@@ -69,6 +69,7 @@ test("typed durable history retains exact context and unresolved evidence", nati
     const status = await consume(runtime.status());
     assert.notEqual(status.persistence, null);
     assert.equal(await consume(runtime.recoverStorage()), false);
+    assert.equal(await consume(runtime.recoverStorageWorker()), false);
     assert.equal((await consume(runtime.storageStatus())).closing, false);
     // No callback is needed to bind and retain admission context.
     // 绑定并保留入场上下文不需要回调。

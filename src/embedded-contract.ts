@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "c5d56dceebc43c1488155c324db51fdc97470eb92431cd3fce57f97e7daa80ba" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "05171a3cc51160288de8b5249a509293115e7a8d42c9f5f92122108fb18f2f20" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -49,7 +49,7 @@ export const EMBEDDED_ROOT_COMMANDS = Object.freeze(["describe","runtime_reserve
  * Generated wire shape for EMBEDDED_RUNTIME_COMMANDS.
  * EMBEDDED_RUNTIME_COMMANDS 的生成线形状。
  */
-export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
+export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","storage_worker_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
 
 /**
  * Generated wire shape for EMBEDDED_DESCRIPTION_VERSION.
@@ -67,7 +67,7 @@ export const EMBEDDED_DESCRIPTION_MAX_BYTES = 16384 as const;
  * Generated wire shape for EMBEDDED_REQUIRED_CAPABILITIES.
  * EMBEDDED_REQUIRED_CAPABILITIES 的生成线形状。
  */
-export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","strict_json_v1"] as const);
+export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","journal_worker_recovery_v1","strict_json_v1"] as const);
 
 /**
  * Generated wire shape for EmbeddedNativeStatus.
@@ -1276,6 +1276,12 @@ export type InputRuntimeCommand = (({
  * type 的生成线形状。
  */
 "type": "storage_recover";
+}) | ({
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "storage_worker_recover";
 }) | ({
 /**
  * Original core runtime namespace, distinct from the containing FFI slot identity.
@@ -3885,6 +3891,28 @@ export type OutputRuntimeStorageStatusResponse = ({
 } & Record<string, EmbeddedJsonValue>);
 
 /**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeStorageWorkerRecoverResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": boolean;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
  * Generated wire shape for EmbeddedRootResponseMap.
  * EmbeddedRootResponseMap 的生成线形状。
  */
@@ -4101,4 +4129,9 @@ export type EmbeddedRuntimeResponseMap = {
  * storage_status 的生成线形状。
  */
 "storage_status": OutputRuntimeStorageStatusResponse;
+/**
+ * Generated wire shape for storage_worker_recover.
+ * storage_worker_recover 的生成线形状。
+ */
+"storage_worker_recover": OutputRuntimeStorageWorkerRecoverResponse;
 };
