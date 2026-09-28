@@ -12,6 +12,12 @@ SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正
 
 ## 嵌入式运行时契约（开发中）
 
+通过 `initialize(engineOptions, runtimeConfig, persistence = null)` 显式启用持久模式。省略存储参数保持纯内存行为。传入生成配置，完整声明宿主管理的绝对 `path`、`journal` 保留预算及 `worker` 回执预算；SDK 不补造存储默认值，也不回退。初始化回执只确认尝试，实际结果须查询原生状态。状态包含可选实际存储所有权，协调关闭等待核心、写入者及保留回执排空。
+
+运行时 `storageStatus / recoverStorage` 提供写入者所有权观测与同一原文件的显式恢复；`historyGet / historyNext / historyForget` 按原**核心运行时命名空间**访问历史，该身份区别于 FFI 槽 ID。历史与恢复走工作通道；存储状态及操作方法 `persistenceFailure / retryCheckpoint` 走控制通道。恢复不自动重试检查点或重放业务；无失败检查点时重试报告忙碌，返回假表示已有重试尚未完成。历史枚举使用原键游标，不提供跨调用快照。
+
+历史不会变成活动句柄。删除精确修订历史前须先遗忘活动操作元数据；副作用未决时继续保留，包括整体副作用仍未知的普通成功 Lua。外部事务对账、已失败写入者替换及进程退出后执行栈恢复尚不由这些方法提供。这些开发接口要求匹配的开发核心，不代表已发布包兼容。
+
 `embeddedContract` 导出生成的请求／响应类型、逐命令响应映射及精确契约摘要。包内 `contracts/embedded/v1/` 复制自正在开发的核心，输入与输出类型分别反映 Rust 反序列化和序列化规则。`EmbeddedNativeStatus` 也从包顶层导出。这是开发契约，现有已发布的 0.5.7 原生库不提供新增嵌入式运行时 API。`EmbeddedTransport` 向显式选择的匹配库绑定一个只读发现导出及五个传输导出。固定命令工作线程、自动回调泵、类型句柄及协调生命周期作用域均已实现；完整持久恢复仍属于后续里程碑。
 
 原生分配前，`EmbeddedTransport` 复制由动态库拥有且长度有界的 `luaskills_ffi_embedded_describe_v1` 字节，检查精确核心、协议、ABI 和描述版本、包内契约摘要、必需命令／能力、支持的后端、进程系统及指针位宽。缺少发现入口或元数据不兼容抛出 `EmbeddedCompatibilityError`；原生状态失败仍为 `EmbeddedTransportError`。借用描述字节绝不能交给结果释放函数。`coreDescription` 返回独立类型快照，释放后仍可读取。构建输入摘要仅描述选定输入，不认证二进制，也不证明完整封闭构建。

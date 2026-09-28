@@ -57,6 +57,50 @@ test("distributed facade declarations preserve generated options, immutable iden
   assert.equal(result.status, 0, `${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
 });
 
+// Real durable calls retain their original context while metadata and history have separate lifetimes.
+// 真实持久调用保留原上下文，元数据和历史拥有独立寿命。
+test("typed durable history retains exact context and unresolved evidence", native, async () => {
+  await withRuntime(async ({ driver, runtimeId, moduleDefinition, poolPolicy }) => {
+    // The facade uses the exact initialized native slot owned by this fixture.
+    // 外观使用此夹具拥有的精确已初始化原生槽。
+    const runtime = new EmbeddedClient(driver).runtime(runtimeId);
+    // Original core namespace is the history key, not the transport-local slot identity.
+    // 原核心命名空间是历史键，而非传输局部槽身份。
+    const status = await consume(runtime.status());
+    assert.notEqual(status.persistence, null);
+    assert.equal(await consume(runtime.recoverStorage()), false);
+    assert.equal((await consume(runtime.storageStatus())).closing, false);
+    // No callback is needed to bind and retain admission context.
+    // 绑定并保留入场上下文不需要回调。
+    const pool = await consume(runtime.registerPool(moduleDefinition("return {call=function(a) return a end}"), poolPolicy, [], "durable-ts-v1"));
+    // Preserve the original admitted operation and terminal value.
+    // 保留原入场操作与终态值。
+    const operation = await consume(pool.submit("call", { durable: "中文" }, invocation, 10000));
+    // Terminal publication requires native durable confirmation.
+    // 终态发布需要原生持久确认。
+    const done = await operation.wait();
+    assert.equal(await consume(operation.persistenceFailure()), null);
+    // Retry without a failure must be rejected rather than replaying business work.
+    // 没有故障的重试必须被拒绝，不能重放业务工作。
+    const retry = operation.retryCheckpoint();
+    await assert.rejects(retry.result(), (error) => error.code === "busy");
+    retry.forget();
+    // Compare the entire persisted snapshot and original namespace.
+    // 比较整个持久快照与原命名空间。
+    const history = await consume(runtime.historyGet(status.core_runtime_id, operation.operationId));
+    assert.deepEqual(history.snapshot, done);
+    assert.deepEqual(await consume(runtime.historyNext()), history);
+    assert.equal(await consume(runtime.historyNext({ runtime_id: history.runtime_id, operation_id: operation.operationId })), null);
+    await consume(operation.forget());
+    // Ordinary Lua success does not reconcile all possible external effects.
+    // 普通 Lua 成功不表示所有可能外部副作用均已对账。
+    const deletion = runtime.historyForget(history.runtime_id, operation.operationId, history.revision);
+    await assert.rejects(deletion.result(), (error) => error.code === "busy");
+    deletion.forget();
+    assert.deepEqual(await consume(runtime.historyGet(history.runtime_id, operation.operationId)), history);
+  }, { driverConfig, persistent: true });
+});
+
 test("typed shared pools preserve native values, errors, accounting and separate receipt forgetting", native, async () => {
   await withClient(async ({ runtime, driver, moduleDefinition, poolPolicy, pluginConfig }) => {
     const plugin = await consume(runtime.registerPlugin("typescript-second", pluginConfig));

@@ -152,15 +152,44 @@ export class EmbeddedRuntime {
    * 显式生成引擎选项。
    * @param runtimeConfig Explicit aggregate runtime budgets.
    * 显式聚合运行时预算。
+   * @param persistence Explicit host database and storage budgets; null selects memory-only execution.
+   * 显式宿主数据库与存储预算；空值选择纯内存执行。
    * @returns Attempt receipt; query status for ready, failed or faulted and never replay initialization.
    * 尝试回执；查询状态区分就绪、失败或故障，不重放初始化。
    */
-  initialize(engineOptions: wire.InputLuaEngineOptions, runtimeConfig: wire.InputEmbeddedRuntimeConfig): EmbeddedPending<wire.OutputRuntimeReceipt> {
-    return this.#client.root({ type: "runtime_initialize", runtime_id: this.#runtimeId, engine_options: engineOptions, runtime_config: runtimeConfig }, "work");
-  }
+  initialize(engineOptions: wire.InputLuaEngineOptions, runtimeConfig: wire.InputEmbeddedRuntimeConfig, persistence: wire.InputRuntimePersistenceConfig | null = null): EmbeddedPending<wire.OutputRuntimeReceipt> {
+      return this.#client.root({ type: "runtime_initialize", runtime_id: this.#runtimeId, engine_options: engineOptions, runtime_config: runtimeConfig, persistence }, "work");
+    }
   /** Query actual initialization and closure state; return a retained native snapshot receipt.
    * 查询实际初始化及关闭状态；返回保留原生快照回执。 */
   status(): EmbeddedPending<wire.OutputRuntimeSnapshot> { return this.#client.root({ type: "runtime_status", runtime_id: this.#runtimeId }, "control"); }
+  /** Return actual storage worker ownership on the control lane; memory-only runtimes reject the request.
+   * 在控制通道返回实际存储工作线程所有权；纯内存运行时拒绝请求。 */
+  storageStatus(): EmbeddedPending<wire.OutputOperationJournalWorkerStatus> { return this.request({ type: "storage_status" }, "control"); }
+  /** Reopen and validate the original failed database on the work lane; return whether recovery was needed.
+   * 在工作通道重新打开并校验原故障数据库；返回是否需要恢复。
+   * This does not retry a checkpoint or execute business work; request the original checkpoint retry separately.
+   * 此操作不重试检查点或执行业务工作；需独立请求原检查点重试。 */
+  recoverStorage(): EmbeddedPending<boolean> { return this.request({ type: "storage_recover" }, "work"); }
+  /** Read exact original historyRuntimeId/operationId on the work lane; null does not prove no execution occurred.
+   * 在工作通道读取精确原始 historyRuntimeId/operationId；空值不证明从未执行。 */
+  historyGet(historyRuntimeId: string, operationId: string): EmbeddedPending<wire.OutputJournalOperation | null> {
+    return this.request({ type: "history_get", history_runtime_id: historyRuntimeId, operation_id: operationId }, "work");
+  }
+  /** Read one row after the original cursor, or the first row for null; return null at enumeration end.
+   * 读取原始游标之后的一条记录，空值表示首条；枚举结束返回空值。
+   * Concurrent changes are not a multi-call snapshot; historical identities do not become active handles.
+   * 并发变更不构成跨调用快照；历史身份不会成为活动句柄。 */
+  historyNext(after: wire.InputHistoryCursor | null = null): EmbeddedPending<wire.OutputJournalOperation | null> {
+    return this.request({ type: "history_next", after }, "work");
+  }
+  /** Delete reconciled terminal history at expectedRevision; forget any retained live operation first.
+   * 按 expectedRevision 删除已对账终态历史；需先遗忘仍保留的活动操作。
+   * Return the deletion receipt; stale revisions and unresolved effects preserve the record.
+   * 返回删除回执；过期修订和未决副作用保留记录。 */
+  historyForget(historyRuntimeId: string, operationId: string, expectedRevision: wire.EmbeddedInteger): EmbeddedPending<null> {
+    return this.request({ type: "history_forget", history_runtime_id: historyRuntimeId, operation_id: operationId, expected_revision: expectedRevision }, "work");
+  }
   /** Request native closure; return acknowledgement without claiming actual drainage.
    * 请求原生关闭；返回确认，不宣称实际排空。 */
   requestClose(): EmbeddedPending<wire.OutputRuntimeReceipt> { return this.#client.root({ type: "runtime_close", runtime_id: this.#runtimeId }, "control"); }
@@ -360,6 +389,14 @@ export class EmbeddedOperation {
   /** Return a retained native snapshot with complete available effect evidence, including after failure.
    * 返回保留原生快照及完整可用副作用证据，包括失败之后。 */
   status(): EmbeddedPending<wire.OutputOperationSnapshot> { return this.#runtime.request({ type: "operation_status", operation_id: this.#operationId }, "control"); }
+  /** Return the retained original checkpoint failure without disk waits or implicit retries.
+   * 返回保留的原始检查点故障，不等待磁盘或隐式重试。 */
+  persistenceFailure(): EmbeddedPending<wire.OutputOperationPersistenceFailure | null> { return this.#runtime.request({ type: "operation_persistence_failure", operation_id: this.#operationId }, "control"); }
+  /** Request one checkpoint retry; false means already pending and no failure reports busy.
+   * 请求一次检查点重试；假表示已在等待，不存在故障则报告忙碌。
+   * Return the receipt without replaying Lua or host callbacks or replacing the original result.
+   * 返回回执，不重放 Lua 或宿主回调，也不替换原结果。 */
+  retryCheckpoint(): EmbeddedPending<boolean> { return this.#runtime.request({ type: "operation_retry_checkpoint", operation_id: this.#operationId }, "control"); }
   /** Request cooperative cancellation; return whether intent changed, without implying actual completion.
    * 请求协作取消；返回意图是否变化，不代表实际完成。 */
   cancel(): EmbeddedPending<boolean> { return this.#runtime.request({ type: "operation_cancel", operation_id: this.#operationId }, "control"); }

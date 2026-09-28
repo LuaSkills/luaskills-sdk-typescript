@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "e85a237140e8d6d761b69d3bde97e05e290630eec463f1127c4a6a2b7ef888fc" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "68e971c1da5ddb803713cdcf3900b1bb4a2559ad4cbc1633ed9a334fe3418fb8" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -49,7 +49,7 @@ export const EMBEDDED_ROOT_COMMANDS = Object.freeze(["describe","runtime_reserve
  * Generated wire shape for EMBEDDED_RUNTIME_COMMANDS.
  * EMBEDDED_RUNTIME_COMMANDS 的生成线形状。
  */
-export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
+export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","history_get","history_next","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
 
 /**
  * Generated wire shape for EMBEDDED_DESCRIPTION_VERSION.
@@ -67,7 +67,7 @@ export const EMBEDDED_DESCRIPTION_MAX_BYTES = 16384 as const;
  * Generated wire shape for EMBEDDED_REQUIRED_CAPABILITIES.
  * EMBEDDED_REQUIRED_CAPABILITIES 的生成线形状。
  */
-export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","strict_json_v1"] as const);
+export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","live_storage_recovery_v1","strict_json_v1"] as const);
 
 /**
  * Generated wire shape for EmbeddedNativeStatus.
@@ -259,6 +259,11 @@ export type InputCommand = (({
  * 显式核心引擎选项，使用现有引擎选项契约。
  */
 "engine_options": InputLuaEngineOptions;
+/**
+ * Explicit durable storage; absence selects memory-only execution without creating a database.
+ * 显式持久存储；缺失表示纯内存执行，不创建数据库。
+ */
+"persistence"?: (InputRuntimePersistenceConfig | null);
 /**
  * Explicit formal runtime budgets validated before worker construction.
  * 工作线程构造前校验的显式正式运行时预算。
@@ -491,6 +496,23 @@ export type InputEmbeddedRuntimeConfig = ({
  * 声明的执行后端；不可用的取值直接拒绝，不降级。
  */
 export type InputExecutionBackend = ("in_process" | "worker_process");
+
+/**
+ * Exact historical cursor; its fields come from the original durable record, not a newly opened runtime.
+ * 精确历史游标；字段来自原持久记录，不来自新打开的运行时。
+ */
+export type InputHistoryCursor = ({
+/**
+ * Original operation identity within that namespace.
+ * 该命名空间中的原始操作身份。
+ */
+"operation_id": string;
+/**
+ * Original core runtime namespace from the returned history record.
+ * 返回历史记录中的原始核心运行时命名空间。
+ */
+"runtime_id": string;
+});
 
 /**
  * Strict host completion shapes match CapabilityOutcome::to_json, preserving successful JSON null.
@@ -1020,6 +1042,45 @@ export type InputModuleExport = ({
 });
 
 /**
+ * Explicit retention budgets; SQLite journal/cache overhead is separate from the database-file cap.
+ * 显式保留预算；SQLite 日志及缓存开销与数据库文件上限分开计算。
+ */
+export type InputOperationJournalConfig = ({
+/**
+ * Maximum main database bytes, rounded down to whole SQLite pages.
+ * 主数据库最大字节数，向下取整至完整 SQLite 页。
+ */
+"max_database_bytes": EmbeddedInteger;
+/**
+ * Maximum UTF-8 JSON bytes for one complete stored record, including identities and revision.
+ * 单条完整存储记录的最大 UTF-8 JSON 字节数，包含身份及修订号。
+ */
+"max_record_bytes": EmbeddedInteger;
+/**
+ * Maximum retained operations across all runtime namespaces; no automatic eviction occurs.
+ * 所有运行时命名空间合计保留的最大操作数；不自动淘汰。
+ */
+"max_records": EmbeddedInteger;
+});
+
+/**
+ * Explicit budgets include queued, executing and caller-retained completed write receipts.
+ * 显式预算包含排队、执行中及调用方仍保留的已完成写入回执。
+ */
+export type InputOperationJournalWorkerConfig = ({
+/**
+ * Cumulative JSON request bytes retained across all admitted write attempts.
+ * 所有已接纳写入尝试合计保留的 JSON 请求字节数。
+ */
+"max_pending_bytes": EmbeddedInteger;
+/**
+ * Maximum admitted write attempts until their last actual receipt owner releases them.
+ * 最后一个真实回执所有者释放之前，最多接纳的写入尝试数。
+ */
+"max_pending_writes": EmbeddedInteger;
+});
+
+/**
  * Immutable capacity policy for one host-assigned plugin execution group.
  * 单个宿主分配的插件执行分组的不可变容量策略。
  */
@@ -1109,6 +1170,88 @@ export type InputRuntimeClientInfo = ({
  * 一个已初始化运行时的类型化命令；每个身份始终绑定该运行时。
  */
 export type InputRuntimeCommand = (({
+/**
+ * Exact live operation identity in this runtime.
+ * 此运行时中的精确活动操作身份。
+ */
+"operation_id": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "operation_persistence_failure";
+}) | ({
+/**
+ * Exact live operation identity retaining the failed candidate.
+ * 保留失败候选的精确活动操作身份。
+ */
+"operation_id": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "operation_retry_checkpoint";
+}) | ({
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "storage_status";
+}) | ({
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "storage_recover";
+}) | ({
+/**
+ * Original core runtime namespace, distinct from the containing FFI slot identity.
+ * 原核心运行时命名空间，区别于外层 FFI 槽身份。
+ */
+"history_runtime_id": string;
+/**
+ * Exact original operation identity.
+ * 精确原始操作身份。
+ */
+"operation_id": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "history_get";
+}) | ({
+/**
+ * Original history key returned by a prior row, with no inferred current-runtime substitution.
+ * 前一行返回的原始历史键，不推断替换为当前运行时。
+ */
+"after"?: (InputHistoryCursor | null);
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "history_next";
+}) | ({
+/**
+ * Positive original revision required for atomic compare-and-swap removal.
+ * 原子比较交换删除所需的原始正修订号。
+ */
+"expected_revision": EmbeddedInteger;
+/**
+ * Original historical runtime namespace.
+ * 原始历史运行时命名空间。
+ */
+"history_runtime_id": string;
+/**
+ * Exact original operation identity.
+ * 精确原始操作身份。
+ */
+"operation_id": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "history_forget";
+}) | ({
 /**
  * Explicit aggregate plugin budgets.
  * 显式插件聚合预算。
@@ -1473,6 +1616,28 @@ export type InputRuntimeCommand = (({
 }));
 
 /**
+ * Explicit host storage selection; omitting this whole object selects the existing memory-only runtime.
+ * 显式宿主存储选择；省略整个对象表示选择既有纯内存运行时。
+ */
+export type InputRuntimePersistenceConfig = ({
+/**
+ * Explicit durable retention limits, independent of transient runtime budgets.
+ * 显式持久保留上限，独立于瞬态运行时预算。
+ */
+"journal": InputOperationJournalConfig;
+/**
+ * Absolute database path owned and protected by the host, never a plugin-selected location.
+ * 由宿主拥有和保护的绝对数据库路径，绝非插件选择位置。
+ */
+"path": string;
+/**
+ * Explicit bounded storage-thread receipt limits.
+ * 显式有界存储线程回执上限。
+ */
+"worker": InputOperationJournalWorkerConfig;
+});
+
+/**
  * Generic request-scoped context injected by the host into one runtime invocation.
  * 宿主在单次运行时调用中注入的通用请求级上下文。
  */
@@ -1727,6 +1892,12 @@ export type OutputCapabilityRegistrationStatus = ({
  * 可信调用方必须具备的作用域，独立于 Lua 业务参数。
  */
 export type OutputCapabilityScope = ("invocation" | "session");
+
+/**
+ * Recovery state is independent of the operation's business phase and cancellation intent.
+ * 恢复状态独立于操作业务阶段及取消意愿。
+ */
+export type OutputCheckpointRetryState = ("waiting" | "requested" | "retrying");
 
 /**
  * Host-reported effect outcome, independent from execution success or cancellation.
@@ -2155,6 +2326,28 @@ export type OutputHostRequestStatus = ({
 export type OutputInitializationPhase = ("reserved" | "initializing" | "ready" | "failed" | "faulted");
 
 /**
+ * Historical checkpoint, not a live handle and not evidence authorizing execution replay.
+ * 历史检查点，不是活动句柄，也不是授权执行重放的证据。
+ */
+export type OutputJournalOperation = ({
+/**
+ * Monotonic compare-and-swap revision; positive and bounded by SQLite's signed integer.
+ * 单调比较交换修订号；为正数且受 SQLite 有符号整数范围约束。
+ */
+"revision": EmbeddedInteger;
+/**
+ * Original runtime namespace, never rebound to the namespace of a restarted runtime.
+ * 原始运行时命名空间，绝不重新绑定到重启后的命名空间。
+ */
+"runtime_id": string;
+/**
+ * Exact last committed observation; an unfinished phase remains unfinished after restart.
+ * 最后提交的精确观测；未结束的阶段在重启后仍保持未结束。
+ */
+"snapshot": OutputOperationSnapshot;
+});
+
+/**
  * Explicit operation origin; unbound low-level work is never inferred to belong to a current plugin.
  * 明确的操作来源；未绑定的低层工作绝不被推断归属于当前插件。
  */
@@ -2191,6 +2384,75 @@ export type OutputOperationContext = (({
  */
 "pool_id": string;
 }));
+
+/**
+ * Live worker observations; retained receipts keep quota even after the thread has finished.
+ * 实时工作线程观测；线程结束后，保留的回执仍占有配额。
+ */
+export type OutputOperationJournalWorkerStatus = ({
+/**
+ * New attempts are permanently refused while admitted attempts finish normally.
+ * 永久拒绝新尝试，而已接纳尝试正常完成。
+ */
+"closing": boolean;
+/**
+ * First infrastructure failure; individual database rejection remains on its own receipt.
+ * 首个基础设施故障；单独的数据库拒绝仍位于各自回执。
+ */
+"failure": (OutputEmbeddedError | null);
+/**
+ * Encoded request bytes reserved until each attempt's last owner disappears.
+ * 每次尝试最后一个所有者消失前预留的请求编码字节数。
+ */
+"pending_bytes": EmbeddedInteger;
+/**
+ * Total owned attempts including caller-retained completed receipts.
+ * 拥有的尝试总数，包含调用方保留的已完成回执。
+ */
+"pending_writes": EmbeddedInteger;
+/**
+ * Attempts still owned by the queue.
+ * 仍由队列拥有的尝试数。
+ */
+"queued_writes": EmbeddedInteger;
+/**
+ * Actual thread termination, observed from its join handle rather than a provisional flag.
+ * 从等待句柄观测到的真实线程终止，而非临时标记。
+ */
+"worker_exited": boolean;
+/**
+ * Whether a real write is currently owned by the storage thread.
+ * 存储线程当前是否拥有真实写入。
+ */
+"writing": boolean;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * A failed checkpoint remains queryable by exact operation ID until that original checkpoint is acknowledged.
+ * 失败检查点可按精确操作 ID 查询，直至原检查点得到确认。
+ */
+export type OutputOperationPersistenceFailure = ({
+/**
+ * Retained persistence error; this does not rewrite the original business result.
+ * 保留的持久化错误；不改写原始业务结果。
+ */
+"error": OutputEmbeddedError;
+/**
+ * Stable original operation identity, never a replacement execution.
+ * 稳定的原始操作身份，绝非替代执行。
+ */
+"operation_id": string;
+/**
+ * Exact candidate phase whose write failed; terminal candidates are not yet publicly terminal.
+ * 写入失败的精确候选阶段；终态候选尚不是公开终态。
+ */
+"phase": OutputOperationPhase;
+/**
+ * Explicit host retry coordination, separate from ordinary polling.
+ * 显式宿主重试协调，独立于普通轮询。
+ */
+"retry": OutputCheckpointRetryState;
+} & Record<string, EmbeddedJsonValue>);
 
 /**
  * Execution phase; cancellation intent is reported separately from actual termination.
@@ -2331,8 +2593,8 @@ export type OutputRuntimeReceipt = ({
  */
 export type OutputRuntimeSnapshot = ({
 /**
- * True only after native core workers have exited, or no core was ever created.
- * 仅当原生核心工作线程已退出或从未创建核心时为真。
+ * True only after construction finishes and all created core and storage workers and receipts drain.
+ * 仅在构造结束且全部已创建核心、存储线程与回执排空后为真。
  */
 "closed": boolean;
 /**
@@ -2355,6 +2617,11 @@ export type OutputRuntimeSnapshot = ({
  * 实际单次构造状态。
  */
 "initialization": OutputInitializationPhase;
+/**
+ * Actual storage worker status when durable ownership has been created, including failed construction.
+ * 持久所有权创建后的实际存储工作线程状态，包含构造失败。
+ */
+"persistence": (OutputOperationJournalWorkerStatus | null);
 /**
  * Live resident and execution accounting directly from the core when available.
  * 可用时直接来自核心的实时常驻与执行计数。
@@ -2806,6 +3073,72 @@ export type OutputRuntimeCapabilityUnregisterResponse = ({
  * Borrowed success envelope avoids cloning application output during native response publication.
  * 借用成功信封，避免原生响应发布期间克隆应用输出。
  */
+export type OutputRuntimeHistoryForgetResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": null;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeHistoryGetResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": (OutputJournalOperation | null);
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeHistoryNextResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": (OutputJournalOperation | null);
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
 export type OutputRuntimeHostRequestCompleteResponse = ({
 /**
  * Single protocol version authority.
@@ -2905,6 +3238,50 @@ export type OutputRuntimeOperationForgetResponse = ({
  * 借用结果，其所有者跨序列化存活。
  */
 "result": null;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeOperationPersistenceFailureResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": (OutputOperationPersistenceFailure | null);
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeOperationRetryCheckpointResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": boolean;
 /**
  * Exact success discriminator.
  * 精确成功判别。
@@ -3265,6 +3642,50 @@ export type OutputRuntimeSessionSubmitResponse = ({
 } & Record<string, EmbeddedJsonValue>);
 
 /**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeStorageRecoverResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": boolean;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeStorageStatusResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": OutputOperationJournalWorkerStatus;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
  * Generated wire shape for EmbeddedRootResponseMap.
  * EmbeddedRootResponseMap 的生成线形状。
  */
@@ -3337,6 +3758,21 @@ export type EmbeddedRuntimeResponseMap = {
  */
 "capability_unregister": OutputRuntimeCapabilityUnregisterResponse;
 /**
+ * Generated wire shape for history_forget.
+ * history_forget 的生成线形状。
+ */
+"history_forget": OutputRuntimeHistoryForgetResponse;
+/**
+ * Generated wire shape for history_get.
+ * history_get 的生成线形状。
+ */
+"history_get": OutputRuntimeHistoryGetResponse;
+/**
+ * Generated wire shape for history_next.
+ * history_next 的生成线形状。
+ */
+"history_next": OutputRuntimeHistoryNextResponse;
+/**
  * Generated wire shape for host_request_complete.
  * host_request_complete 的生成线形状。
  */
@@ -3361,6 +3797,16 @@ export type EmbeddedRuntimeResponseMap = {
  * operation_forget 的生成线形状。
  */
 "operation_forget": OutputRuntimeOperationForgetResponse;
+/**
+ * Generated wire shape for operation_persistence_failure.
+ * operation_persistence_failure 的生成线形状。
+ */
+"operation_persistence_failure": OutputRuntimeOperationPersistenceFailureResponse;
+/**
+ * Generated wire shape for operation_retry_checkpoint.
+ * operation_retry_checkpoint 的生成线形状。
+ */
+"operation_retry_checkpoint": OutputRuntimeOperationRetryCheckpointResponse;
 /**
  * Generated wire shape for operation_status.
  * operation_status 的生成线形状。
@@ -3441,4 +3887,14 @@ export type EmbeddedRuntimeResponseMap = {
  * session_submit 的生成线形状。
  */
 "session_submit": OutputRuntimeSessionSubmitResponse;
+/**
+ * Generated wire shape for storage_recover.
+ * storage_recover 的生成线形状。
+ */
+"storage_recover": OutputRuntimeStorageRecoverResponse;
+/**
+ * Generated wire shape for storage_status.
+ * storage_status 的生成线形状。
+ */
+"storage_status": OutputRuntimeStorageStatusResponse;
 };
