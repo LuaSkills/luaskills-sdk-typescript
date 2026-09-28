@@ -32,6 +32,32 @@ test("automatic finalization preserves both real Lua outcomes", native, async ()
   });
 });
 
+// Session shutdown exposes its reserved operation without rewriting an earlier business result.
+// 会话关闭暴露其预留操作，不改写较早的业务结果。
+test("session finalization preserves business and exposes its independent operation", native, async () => {
+  await withRuntime(async ({ command, moduleDefinition, poolPolicy, terminal, pluginId }) => {
+    const definition = moduleDefinition("local n=0; return {call=function() n=n+1; return tostring(n) end, shutdown=function() return tostring(n) end}");
+    definition.exports.push({ name: "shutdown", input_schema: true, output_schema: true });
+    definition.finalizer = { export: "shutdown", arguments: null, timeout_ms: 1000 };
+    const poolId = command({ type: "pool_register", definition, policy: { ...poolPolicy, reuse: "session" }, permissions: ["typescript.host"], execution_revision: "typescript-v1" }).pool_id;
+    const opening = command({ type: "session_open", pool_id: poolId, timeout_ms: 5000 });
+    assert.equal((await terminal(opening.operation_id)).phase, "succeeded");
+    assert.equal(command({ type: "plugin_status", plugin_id: pluginId }).reserved_operations, 1);
+    const operationId = command({ type: "session_submit", session_id: opening.session_id, export: "call", arguments: null, context: { request_context: null, client_budget: null, tool_config: null }, timeout_ms: 5000 }).operation_id;
+    const business = await terminal(operationId);
+    assert.equal(business.value, "1");
+    command({ type: "session_close", session_id: opening.session_id });
+    const session = await poll(() => command({ type: "session_status", session_id: opening.session_id }), (status) => status.phase === "closed");
+    assert.notEqual(session.finalization_operation, operationId);
+    const closing = await terminal(session.finalization_operation);
+    assert.equal(closing.phase, "succeeded");
+    assert.deepEqual(closing.finalization.business, { status: "succeeded", value: null });
+    assert.deepEqual(closing.finalization.outcome, { status: "succeeded", value: "1" });
+    assert.deepEqual(command({ type: "operation_status", operation_id: operationId }), business);
+    assert.equal(command({ type: "plugin_status", plugin_id: pluginId }).reserved_operations, 0);
+  });
+});
+
 test("invalid budgets fail before loading a native library", () => {
   for (const value of [0, -1, 1.5, true, Number.MAX_SAFE_INTEGER + 1, 1n << 63n]) {
     assert.throws(() => new EmbeddedTransport({ ...budgets, max_runtimes: value }, { libraryPath: "missing-library" }), /integer|uint64|isize/);

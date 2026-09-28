@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "ccb8c75c26b271cdcb90d75d7d724ed7f38624cb4cc63663282f82878a8ee4d9" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "635f47f2884420e36876114474310bf197c9d2941204f626b5255f1e885c55b8" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -2215,6 +2215,11 @@ export type OutputEmbeddedPluginSnapshot = ({
  */
 "queued_calls": EmbeddedInteger;
 /**
+ * Capacity reserved for closing long-lived instances, before their operation identities become queryable.
+ * 为关闭长生命周期实例预留的容量，此时相应操作身份尚不可查询。
+ */
+"reserved_operations": EmbeddedInteger;
+/**
  * Actual resident VM counters through confirmed destruction.
  * 持续记账到确认销毁的实际常驻 VM 计数。
  */
@@ -2285,10 +2290,15 @@ export type OutputEmbeddedSessionSnapshot = ({
  */
 "active_operation": (string | null);
 /**
- * First execution failure that made the session unusable.
- * 导致会话不可用的首次执行错误。
+ * First business or closing failure; a later cleanup error cannot replace the original failure.
+ * 首次业务或关闭错误；后续清理错误不能替换原始错误。
  */
 "error": (OutputEmbeddedError | null);
+/**
+ * Independently retained closing operation; absent until eligible session cleanup is scheduled.
+ * 独立保留的关闭操作；符合条件的会话清理被调度前省略。
+ */
+"finalization_operation": (string | null);
 /**
  * Current lifecycle observation.
  * 当前生命周期观测。
