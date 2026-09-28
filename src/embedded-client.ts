@@ -250,6 +250,15 @@ export class EmbeddedRuntime {
   /** Bind known pluginId and return a handle without probing its native existence.
    * 绑定已知 pluginId 并返回句柄，不探测其原生存在性。 */
   plugin(pluginId: string): EmbeddedPlugin { return new EmbeddedPlugin(this, pluginId); }
+  /** Register complete config for exact pluginId; return the acknowledged capacity without replay.
+   * 为精确 pluginId 注册完整 config；返回已确认容量，不重放。 */
+  registerCapacity(pluginId: string, config: wire.InputEmbeddedCapacityConfig): EmbeddedPending<EmbeddedCapacity> {
+    return this.request({ type: "capacity_register", plugin_id: pluginId, config }, "work")
+      .map((value) => this.capacity(value.capacity_id));
+  }
+  /** Bind exact capacityId to this runtime without probing; return an immutable local handle.
+   * 将精确 capacityId 绑定到此运行时，不探测；返回不可变本地句柄。 */
+  capacity(capacityId: string): EmbeddedCapacity { return new EmbeddedCapacity(this, capacityId); }
   /** Bind known poolId and return a handle without inferring its generation or policy.
    * 绑定已知 poolId 并返回句柄，不推断其代次或策略。 */
   pool(poolId: string): EmbeddedPool { return new EmbeddedPool(this, poolId); }
@@ -290,6 +299,50 @@ export class EmbeddedPlugin {
   /** Remove only a drained plugin record; return the retained native acknowledgement.
    * 仅移除已排空插件记录；返回保留原生确认。 */
   forget(): EmbeddedPending<null> { return this.#runtime.request({ type: "plugin_forget", plugin_id: this.#pluginId }, "control"); }
+}
+
+/** Immutable plugin-owned capacity shared by isolated modules; native ownership remains authoritative.
+ * 隔离模块共享的不可变插件自有容量；原生归属保持权威。 */
+export class EmbeddedCapacity {
+  // Every member and lifecycle request uses the original runtime namespace.
+  // 每个成员及生命周期请求使用原始运行时命名空间。
+  readonly #runtime: EmbeddedRuntime;
+  // Failure and plugin updates never replace this exact capacity identity.
+  // 失败及插件更新绝不替换此精确容量身份。
+  readonly #capacityId: string;
+  /** Bind runtime and capacityId without registration or probing; return an immutable handle.
+   * 绑定 runtime 和 capacityId，不注册或探测；返回不可变句柄。 */
+  constructor(runtime: EmbeddedRuntime, capacityId: string) {
+    this.#runtime = runtime;
+    this.#capacityId = identity(capacityId);
+    Object.freeze(this);
+  }
+  /** Return the exact native capacity identity, distinct from a command receipt.
+   * 返回精确原生容量身份，区别于命令回执。 */
+  get capacityId(): string { return this.#capacityId; }
+  /** Return live physical, queue and cleanup ownership through the reserved control lane.
+   * 通过预留控制通道返回实时物理、排队及清理归属。 */
+  status(): EmbeddedPending<wire.OutputEmbeddedCapacitySnapshot> {
+    return this.#runtime.request({ type: "capacity_status", capacity_id: this.#capacityId }, "control");
+  }
+  /** Stop admission and request member drainage; return acknowledgement without claiming completion.
+   * 停止入场并请求成员排空；返回确认，不宣称完成。 */
+  requestClose(): EmbeddedPending<null> {
+    return this.#runtime.request({ type: "capacity_close", capacity_id: this.#capacityId }, "control");
+  }
+  /** Forget only an eligible drained capacity; members must be forgotten first.
+   * 仅遗忘符合条件的已排空容量；必须先遗忘成员。 */
+  forget(): EmbeddedPending<null> {
+    return this.#runtime.request({ type: "capacity_forget", capacity_id: this.#capacityId }, "control");
+  }
+  /** Register definition, policy, permissions and executionRevision in this capacity; return its acknowledged member.
+   * 在此容量中注册 definition、policy、permissions 和 executionRevision；返回已确认成员。
+   * Native checks reject foreign plugins and conflicting budgets without independent-placement fallback.
+   * 原生检查拒绝外来插件及冲突预算，不回退独立归属。 */
+  registerPool(definition: wire.InputModuleDefinition, policy: wire.InputPluginPoolConfig, permissions: string[], executionRevision: string): EmbeddedPending<EmbeddedPool> {
+    return this.#runtime.request({ type: "pool_register", capacity_id: this.#capacityId, definition, policy, permissions, execution_revision: executionRevision }, "work")
+      .map((value) => this.#runtime.pool(value.pool_id));
+  }
 }
 
 /** Immutable pool identity preserving its original package generation and host initialization revision.

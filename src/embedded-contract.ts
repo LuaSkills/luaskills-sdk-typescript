@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "416539476de9d537b5294c6346b9c2df462bec299e8ab2303062d5289f45693a" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "005e4d84748b8a9d2ef970512f0f6bfb06cf97ed7ee5282e7c67c0653a3c4907" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -49,7 +49,7 @@ export const EMBEDDED_ROOT_COMMANDS = Object.freeze(["describe","runtime_reserve
  * Generated wire shape for EMBEDDED_RUNTIME_COMMANDS.
  * EMBEDDED_RUNTIME_COMMANDS 的生成线形状。
  */
-export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","storage_worker_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_list","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
+export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","storage_worker_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","capacity_register","capacity_status","capacity_close","capacity_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_list","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
 
 /**
  * Generated wire shape for EMBEDDED_DESCRIPTION_VERSION.
@@ -67,7 +67,7 @@ export const EMBEDDED_DESCRIPTION_MAX_BYTES = 16384 as const;
  * Generated wire shape for EMBEDDED_REQUIRED_CAPABILITIES.
  * EMBEDDED_REQUIRED_CAPABILITIES 的生成线形状。
  */
-export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","journal_worker_recovery_v1","strict_json_v1"] as const);
+export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","capacity_groups_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","journal_worker_recovery_v1","strict_json_v1"] as const);
 
 /**
  * Generated wire shape for EmbeddedNativeStatus.
@@ -345,6 +345,28 @@ export type InputEmbeddedCall = ({
  * 此运行时返回的精确不可变池身份。
  */
 "pool_id": string;
+});
+
+/**
+ * Immutable capacity policy owned by one plugin across isolated module generations.
+ * 单个插件跨隔离模块代次持有的不可变容量策略。
+ */
+export type InputEmbeddedCapacityConfig = ({
+/**
+ * Maximum exact serialized bytes of queued requests across members.
+ * 全部成员排队请求精确序列化字节数上限。
+ */
+"max_queued_bytes": EmbeddedInteger;
+/**
+ * Maximum accepted queued requests across every member pool.
+ * 全部成员池已接纳排队请求的数量上限。
+ */
+"max_queued_calls": EmbeddedInteger;
+/**
+ * Sole physical guarantee and execution limit used by the governor and scheduler together.
+ * 治理器和调度器共同使用的唯一物理保证及执行上限。
+ */
+"resources": InputVmCapacityConfig;
 });
 
 /**
@@ -1434,6 +1456,60 @@ export type InputRuntimeCommand = (({
 "type": "plugin_forget";
 }) | ({
 /**
+ * Complete physical and queued-work budgets; no implicit defaults are inserted.
+ * 完整物理及排队工作预算；不插入隐式默认值。
+ */
+"config": InputEmbeddedCapacityConfig;
+/**
+ * Exact previously registered plugin owner.
+ * 精确先前已注册插件所有者。
+ */
+"plugin_id": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "capacity_register";
+}) | ({
+/**
+ * Exact runtime-issued capacity identity.
+ * 精确运行时签发容量身份。
+ */
+"capacity_id": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "capacity_status";
+}) | ({
+/**
+ * Exact runtime-issued capacity identity.
+ * 精确运行时签发容量身份。
+ */
+"capacity_id": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "capacity_close";
+}) | ({
+/**
+ * Exact runtime-issued capacity identity.
+ * 精确运行时签发容量身份。
+ */
+"capacity_id": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "capacity_forget";
+}) | ({
+/**
+ * Optional exact capacity owner; omission or null explicitly selects independent placement.
+ * 可选精确容量所有者；省略或空值显式选择独立归属。
+ */
+"capacity_id"?: (string | null);
+/**
  * Immutable package and module declaration.
  * 不可变包与模块声明。
  */
@@ -1850,6 +1926,35 @@ export type InputToolCacheConfig = ({
 } & Record<string, EmbeddedJsonValue>);
 
 /**
+ * Immutable physical VM limits shared by multiple independently isolated module pools.
+ * 多个独立隔离模块池共享的不可变物理 VM 限制。
+ * This policy governs resident and actual execution permits, not scheduler queues or plugin authorization.
+ * 此策略治理常驻及实际执行许可，不治理调度队列或插件授权。
+ */
+export type InputVmCapacityConfig = ({
+/**
+ * Shared capacity or a dedicated reservation that other capacity groups cannot borrow.
+ * 公共容量，或其他容量组不能借用的专用预留。
+ */
+"kind": InputPoolKind;
+/**
+ * Maximum real slots across every member pool, including creation and retirement.
+ * 全部成员池实际槽位上限，包含创建及退役。
+ */
+"max_resident_vms": EmbeddedInteger;
+/**
+ * Maximum simultaneous physical execution permits across member pools.
+ * 全部成员池同时持有的物理执行许可上限。
+ */
+"max_running_calls": EmbeddedInteger;
+/**
+ * Minimum committed slots; zero explicitly permits an unreserved group.
+ * 最小承诺槽位；零明确允许无预留分组。
+ */
+"min_resident_vms": EmbeddedInteger;
+});
+
+/**
  * Strict versioned request; unknown fields and commands are explicit protocol errors.
  * 严格版本化请求；未知字段与命令是明确协议错误。
  */
@@ -2054,6 +2159,18 @@ export type OutputCapabilityRegistrationStatus = ({
 export type OutputCapabilityScope = ("invocation" | "session");
 
 /**
+ * Exact capacity identity shared by response reservation and successful native registration.
+ * 响应预留及成功原生注册共享的精确容量身份。
+ */
+export type OutputCapacityReceipt = ({
+/**
+ * Immutable runtime-qualified core capacity identity.
+ * 不可变且运行时限定的核心容量身份。
+ */
+"capacity_id": string;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
  * Recovery state is independent of the operation's business phase and cancellation intent.
  * 恢复状态独立于操作业务阶段及取消意愿。
  */
@@ -2135,6 +2252,85 @@ export type OutputEmbeddedBuildIdentity = ({
  * Cargo 目标操作系统身份。
  */
 "target_os": string;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Immutable capacity policy owned by one plugin across isolated module generations.
+ * 单个插件跨隔离模块代次持有的不可变容量策略。
+ */
+export type OutputEmbeddedCapacityConfig = ({
+/**
+ * Maximum exact serialized bytes of queued requests across members.
+ * 全部成员排队请求精确序列化字节数上限。
+ */
+"max_queued_bytes": EmbeddedInteger;
+/**
+ * Maximum accepted queued requests across every member pool.
+ * 全部成员池已接纳排队请求的数量上限。
+ */
+"max_queued_calls": EmbeddedInteger;
+/**
+ * Sole physical guarantee and execution limit used by the governor and scheduler together.
+ * 治理器和调度器共同使用的唯一物理保证及执行上限。
+ */
+"resources": OutputVmCapacityConfig;
+});
+
+/**
+ * Actual capacity status includes physical ownership and scheduler work retained through cleanup.
+ * 实际容量状态包含物理所有权及保留至清理完成的调度工作。
+ */
+export type OutputEmbeddedCapacitySnapshot = ({
+/**
+ * Dispatched operations keep this charge through actual cleanup and result publication.
+ * 已分发操作跨实际清理及结果发布保留此计费。
+ */
+"active_operations": EmbeddedInteger;
+/**
+ * Runtime-generated opaque identity, never reused after forgetting.
+ * 运行时生成的不透明身份，遗忘后绝不复用。
+ */
+"capacity_id": string;
+/**
+ * Capacity, owning plugin or parent has permanently closed business admission.
+ * 容量、所属插件或父级已永久关闭业务入场。
+ */
+"closing": boolean;
+/**
+ * Non-lendable commitment remains visible even with zero physical VMs.
+ * 即使物理 VM 为零，不可借用承诺仍可见。
+ */
+"committed_resident_vms": EmbeddedInteger;
+/**
+ * Original complete policy, including physical and queued-work budgets.
+ * 原完整策略，包含物理及排队工作预算。
+ */
+"config": OutputEmbeddedCapacityConfig;
+/**
+ * Exact immutable plugin owner.
+ * 精确不可变插件所有者。
+ */
+"plugin_id": string;
+/**
+ * Exact serialized bytes retained by those queued requests.
+ * 这些排队请求保留的精确序列化字节数。
+ */
+"queued_bytes": EmbeddedInteger;
+/**
+ * Accepted requests still waiting for execution admission.
+ * 仍等待执行入场的已接纳请求。
+ */
+"queued_calls": EmbeddedInteger;
+/**
+ * Actual physical state, including creation, native waiting and retirement.
+ * 实际物理状态，包含创建、原生等待及退役。
+ */
+"resources": OutputPoolUsage;
+/**
+ * Retained scheduled member identities, including closed pools awaiting explicit forgetting.
+ * 保留的已调度成员身份，包含等待显式遗忘的已关闭池。
+ */
+"retained_pools": EmbeddedInteger;
 } & Record<string, EmbeddedJsonValue>);
 
 /**
@@ -2843,6 +3039,12 @@ export type OutputOperationSnapshot = ({
 });
 
 /**
+ * Capacity ownership, separate from instance reuse and ordering requirements.
+ * 容量归属，与实例复用及顺序要求相互独立。
+ */
+export type OutputPoolKind = ("shared" | "dedicated");
+
+/**
  * Actual pool registration acknowledgement shared by capacity preparation and publication.
  * 容量准备及发布共享的实际池注册确认。
  */
@@ -3065,6 +3267,35 @@ export type OutputTransportDescription = ({
  */
 "runtime_commands": Array<string>;
 } & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Immutable physical VM limits shared by multiple independently isolated module pools.
+ * 多个独立隔离模块池共享的不可变物理 VM 限制。
+ * This policy governs resident and actual execution permits, not scheduler queues or plugin authorization.
+ * 此策略治理常驻及实际执行许可，不治理调度队列或插件授权。
+ */
+export type OutputVmCapacityConfig = ({
+/**
+ * Shared capacity or a dedicated reservation that other capacity groups cannot borrow.
+ * 公共容量，或其他容量组不能借用的专用预留。
+ */
+"kind": OutputPoolKind;
+/**
+ * Maximum real slots across every member pool, including creation and retirement.
+ * 全部成员池实际槽位上限，包含创建及退役。
+ */
+"max_resident_vms": EmbeddedInteger;
+/**
+ * Maximum simultaneous physical execution permits across member pools.
+ * 全部成员池同时持有的物理执行许可上限。
+ */
+"max_running_calls": EmbeddedInteger;
+/**
+ * Minimum committed slots; zero explicitly permits an unreserved group.
+ * 最小承诺槽位；零明确允许无预留分组。
+ */
+"min_resident_vms": EmbeddedInteger;
+});
 
 /**
  * Live structured failure envelope whose shape also drives SDK generation.
@@ -3397,6 +3628,94 @@ export type OutputRuntimeCapabilityUnregisterResponse = ({
  * 借用结果，其所有者跨序列化存活。
  */
 "result": null;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeCapacityCloseResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": null;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeCapacityForgetResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": null;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeCapacityRegisterResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": OutputCapacityReceipt;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeCapacityStatusResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": OutputEmbeddedCapacitySnapshot;
 /**
  * Exact success discriminator.
  * 精确成功判别。
@@ -4158,6 +4477,26 @@ export type EmbeddedRuntimeResponseMap = {
  * capability_unregister 的生成线形状。
  */
 "capability_unregister": OutputRuntimeCapabilityUnregisterResponse;
+/**
+ * Generated wire shape for capacity_close.
+ * capacity_close 的生成线形状。
+ */
+"capacity_close": OutputRuntimeCapacityCloseResponse;
+/**
+ * Generated wire shape for capacity_forget.
+ * capacity_forget 的生成线形状。
+ */
+"capacity_forget": OutputRuntimeCapacityForgetResponse;
+/**
+ * Generated wire shape for capacity_register.
+ * capacity_register 的生成线形状。
+ */
+"capacity_register": OutputRuntimeCapacityRegisterResponse;
+/**
+ * Generated wire shape for capacity_status.
+ * capacity_status 的生成线形状。
+ */
+"capacity_status": OutputRuntimeCapacityStatusResponse;
 /**
  * Generated wire shape for history_forget.
  * history_forget 的生成线形状。

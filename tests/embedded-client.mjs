@@ -40,6 +40,63 @@ async function withClient(action) {
   }, { driverConfig });
 }
 
+// Actual native capacity handles preserve per-module state and release only after member retirement.
+// 实际原生容量句柄保留各模块状态，仅在成员退役后释放。
+test("typed capacity owns isolated members and explicit release", native, async () => {
+  await withClient(async ({ runtime, pluginId, moduleDefinition, poolPolicy }) => {
+    // One aggregate reservation backs two independent reusable module instances.
+    // 单个聚合预留支持两个独立可复用模块实例。
+    const config = { resources: { kind: "dedicated", min_resident_vms: 1, max_resident_vms: 2, max_running_calls: 1 },
+      max_queued_calls: poolPolicy.max_queued_calls, max_queued_bytes: 4096 };
+    // Registration returns an exact acknowledged native identity.
+    // 注册返回精确已确认原生身份。
+    const capacity = await consume(runtime.registerCapacity(pluginId, config));
+    assert.equal(runtime.capacity(capacity.capacityId).capacityId, capacity.capacityId);
+    // Capacity status must remain on the reserved control worker.
+    // 容量状态必须保持在预留控制工作线程上。
+    const initial = capacity.status();
+    assert.equal(initial.receipt.lane, "control");
+    assert.equal((await consume(initial)).committed_resident_vms, 1);
+    // Both member handles remain distinct through closure and explicit forgetting.
+    // 两个成员句柄跨关闭及显式遗忘保持不同。
+    const pools = [];
+    for (const revision of ["first", "second"]) {
+      // Module-local counters expose accidental cross-member reuse.
+      // 模块局部计数器暴露意外跨成员复用。
+      const definition = moduleDefinition(`-- Keep state private to the original module.
+-- 将状态保持在原模块内。
+local count=0
+-- Return the next count without arguments or external effects.
+-- 返回下一个计数，不使用参数或产生外部副作用。
+return {call=function() count=count+1; return count end}`);
+      definition.generation = revision;
+      pools.push(await consume(capacity.registerPool(definition,
+        { ...poolPolicy, kind: "dedicated", min_resident_vms: 0, max_resident_vms: 1, max_running_calls: 1 }, [], revision)));
+    }
+    for (const pool of pools) {
+      for (const expected of [1, 2]) {
+        // Observe the actual Lua result and release only its completed operation record.
+        // 观测实际 Lua 结果，仅释放已完成操作记录。
+        const operation = await consume(pool.submit("call", null, invocation, 5000));
+        assert.equal((await operation.wait()).value, expected);
+        await consume(operation.forget());
+      }
+    }
+    assert.equal((await consume(capacity.status())).resources.resident, 2);
+    await consume(capacity.requestClose());
+    // Busy keeps the original capacity visible while members remain retained.
+    // 成员仍保留时，忙碌保持原容量可见。
+    const blocked = capacity.forget();
+    await assert.rejects(blocked.result(), (error) => error.code === "busy");
+    blocked.forget();
+    await poll(() => consume(capacity.status()), (status) => status.resources.resident === 0);
+    for (const pool of pools) await consume(pool.forget());
+    assert.equal((await consume(capacity.status())).committed_resident_vms, 1);
+    await consume(capacity.forget());
+    assert.equal((await consume(runtime.plugin(pluginId).status())).committed_resident_vms, 0);
+  });
+});
+
 test("invalid polling bounds and already-aborted observation submit no commands", async () => {
   let submissions = 0;
   const client = new EmbeddedClient({ submit() { submissions += 1; throw new Error("Unexpected command"); } });
