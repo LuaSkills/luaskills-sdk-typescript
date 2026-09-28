@@ -12,6 +12,8 @@ SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正
 
 ## 嵌入式运行时契约（开发中）
 
+可选的 `caller.request_id` 在核心入场时冻结宿主的 `context.request_context.request_id`。它区别于核心操作 ID 和排队回调请求 ID，Lua 可见上下文或参数不能替换它。同操作单次关闭保留该关联，会话开启及独立会话／可复用实例关闭省略关联。宿主仍须显式登记并校验相关作用域：关联本身不授予权限，旧历史省略的值不能用新请求补全。
+
 通过 `initialize(engineOptions, runtimeConfig, persistence = null)` 显式启用持久模式。省略存储参数保持纯内存行为。传入生成配置，完整声明宿主管理的绝对 `path`、`journal` 保留预算及 `worker` 回执预算；SDK 不补造存储默认值，也不回退。初始化回执只确认尝试，实际结果须查询原生状态。状态包含可选实际存储所有权，协调关闭等待核心、写入者及保留回执排空。
 
 运行时 `storageStatus / recoverStorage` 提供写入者所有权观测与同一原文件的显式恢复；`historyGet / historyNext / historyForget` 按原**核心运行时命名空间**访问历史，该身份区别于 FFI 槽 ID。历史与恢复走工作通道；存储状态及操作方法 `persistenceFailure / retryCheckpoint` 走控制通道。恢复不自动重试检查点或重放业务；无失败检查点时重试报告忙碌，返回假表示已有重试尚未完成。历史枚举使用原键游标，不提供跨调用快照。

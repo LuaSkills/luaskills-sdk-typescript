@@ -216,8 +216,10 @@ test("native request errors release no result and reentrant cleanup cannot race 
 test("real queued callback retains trusted identity and late committed evidence after cancellation", native, async () => {
   await withRuntime(async ({ transport, pluginId, command, pool, submit, terminal }) => {
     const registration = command({ type: "capabilities_register", descriptors: [{ name: "typescript.callback", version: "1.0.0", description: "TypeScript integration callback", input_schema: true, output_schema: true, execution: "queued", permissions: ["typescript.host"], scope: "invocation", max_concurrent: 1, max_call_ms: 10000, max_input_bytes: 1024, max_output_bytes: 1024, effects: "mutating", idempotency: "none" }] }).registration_ids[0];
-    const poolId = pool("return {call=function(a) return vulcan.capabilities.call('typescript.callback',a) end}");
-    const operationId = submit(poolId, { plugin_id: "forged", value: null });
+    const poolId = pool("return {call=function(a) vulcan.context.request.request_id='lua-forged'; return vulcan.capabilities.call('typescript.callback',a) end}");
+    // Admission receives immutable host correlation outside the plugin-controlled arguments.
+    // 入场在插件可控参数之外接收不可变宿主关联。
+    const operationId = command({ type: "call_submit", timeout_ms: 10000, call: { pool_id: poolId, export: "call", arguments: { plugin_id: "forged", request_id: "argument-forged", value: null }, context: { request_context: { request_id: "typescript-host-request" }, client_budget: null, tool_config: null } } }).operation_id;
     const requests = await poll(() => command({ type: "host_requests_take", limit: 1 }), (batch) => batch.length > 0);
     assert.equal(requests.length, 1);
     const request = requests[0];
@@ -225,6 +227,9 @@ test("real queued callback retains trusted identity and late committed evidence 
       assert.equal(request.registration_id, registration);
       assert.equal(request.caller.plugin_id, pluginId);
       assert.equal(request.caller.operation_id, operationId);
+      assert.equal(request.caller.request_id, "typescript-host-request");
+      assert.notEqual(request.request_id, request.caller.request_id);
+      assert.equal(request.arguments.request_id, "argument-forged");
       assert.equal(request.arguments.plugin_id, "forged");
       command({ type: "operation_cancel", operation_id: operationId });
       transport.close();
@@ -236,6 +241,8 @@ test("real queued callback retains trusted identity and late committed evidence 
     }
     const done = await terminal(operationId);
     assert.equal(done.phase, "cancelled");
+    assert.equal(done.context.caller.request_id, "typescript-host-request");
+    assert.ok(done.host_effects.every((effect) => effect.caller.request_id === "typescript-host-request"));
     assert.ok(done.host_effects.some((effect) => effect.effects === "committed"));
   });
 });

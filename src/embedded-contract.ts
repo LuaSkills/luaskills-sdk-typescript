@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "efc9224e7a02141c3ffd24a7bb02cf613fa4113e45ac68e81eeef12c9137a867" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "416539476de9d537b5294c6346b9c2df462bec299e8ab2303062d5289f45693a" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -1891,6 +1891,13 @@ export type OutputCapabilityCaller = ({
  * 精确激活的插件身份。
  */
 "plugin_id": string;
+/**
+ * Optional host request correlation frozen at admission, distinct from a queued capability request ID.
+ * 入场时冻结的可选宿主请求关联，区别于排队能力请求 ID。
+ * Lua-visible request context and business arguments cannot replace this value.
+ * Lua 可见请求上下文及业务参数不能替换此值。
+ */
+"request_id"?: (string | null);
 /**
  * Runtime namespace that owns the registration and operation.
  * 拥有注册及操作的运行时命名空间。
