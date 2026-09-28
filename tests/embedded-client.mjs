@@ -123,6 +123,114 @@ test("typed durable history retains exact context and unresolved evidence", nati
   }, { driverConfig, persistent: true });
 });
 
+test("persistent callback capacity failure requires explicit original checkpoint retry without replay", native, async () => {
+  await withRuntime(async ({ driver, transport, runtimeId, moduleDefinition, poolPolicy }) => {
+    // Bind the actual slot and reserve an independent callback worker while persistence is enabled.
+    // 绑定实际槽，并在启用持久化时预留独立回调线程。
+    const runtime = new EmbeddedClient(driver).runtime(runtimeId);
+    // Every actual callback entry records its original operation identity.
+    // 每次实际回调进入均记录其原操作身份。
+    const calls = [];
+    // The fixture drains this callback owner before its native runtime.
+    // 夹具在原生运行时之前排空此回调所有者。
+    const pump = new EmbeddedCallbackPump(transport, runtimeId, { maxConcurrentHandlers: 1, maxPendingCommands: 1, pollIntervalMs: 2 });
+    /** Read optional checkpoint failure after explicit busy observation clears; mutate no business state.
+     * 明确忙碌观察清除后读取可空检查点故障；不变更业务状态。
+     * @param {object} operation Original live operation handle.
+     * 原活动操作句柄。
+     * @returns {Promise<object|null>} Actual failure or healthy absence.
+     * 实际故障或健康缺失。 */
+    const availableFailure = async (operation) => {
+      // Wrap null so completed absence remains distinct from the busy polling marker.
+      // 包装空值，使完成的缺失保持区别于忙碌轮询标记。
+      const observed = await poll(async () => {
+        // Explicitly release each completed query, including a busy error.
+        // 显式释放每个完成查询，包括忙碌错误。
+        const pending = operation.persistenceFailure();
+        try { return { failure: await pending.result() }; }
+        catch (error) { if (error.code === "busy") return null; throw error; }
+        finally { pending.forget(); }
+      }, (observation) => observation !== null);
+      return observed.failure;
+    };
+    try {
+      await pump.ready();
+      // Only this host-owned descriptor enters the captured pool capability snapshot.
+      // 仅此宿主自有描述进入捕获的池能力快照。
+      const descriptor = { name: "durable.callback", version: "1.0.0", description: "Persistent capacity recovery fixture", input_schema: true, output_schema: true, execution: "queued", permissions: ["typescript.host"], scope: "invocation", max_concurrent: 1, max_call_ms: 10000, max_input_bytes: 1024, max_output_bytes: 1024, effects: "mutating", idempotency: "none" };
+      await pump.register([new HostCapability(descriptor, async (argumentsValue, context) => {
+        calls.push(context.caller.operation_id);
+        context.reportEffects("committed");
+        return argumentsValue;
+      })]);
+      // First success fills the one-record journal through a real JavaScript callback.
+      // 首次成功通过真实 JavaScript 回调填满单记录日志。
+      const pool = await consume(runtime.registerPool(moduleDefinition("return {call=function(a) local r=vulcan.capabilities.call('durable.callback',a); return r.value end}"), poolPolicy, ["typescript.host"], "durable-capacity"));
+      // Retain exact original operation identity separately from transient command receipts.
+      // 独立于瞬态命令回执保留精确原操作身份。
+      const first = await consume(pool.submit("call", "committed-once", invocation, 10000));
+      // The actual terminal checkpoint includes the callback's confirmed evidence.
+      // 实际终态检查点包含回调已确认的证据。
+      const firstDone = await first.wait();
+      // Native status is the namespace authority.
+      // 原生状态是命名空间权威。
+      const namespace = (await consume(runtime.status())).core_runtime_id;
+      // Keep the durable row after releasing only live metadata.
+      // 仅释放活动元数据后保留持久行。
+      const history = await consume(runtime.historyGet(namespace, first.operationId));
+      await consume(first.forget());
+      // No capacity remains for this separate operation's execution intent.
+      // 此独立操作的执行意图已无剩余容量。
+      const second = await consume(pool.submit("call", "must-not-run", invocation, 10000));
+      // Query the control lane until it exposes the actual retained storage failure.
+      // 查询控制通道，直至暴露实际保留的存储故障。
+      const failure = await poll(() => availableFailure(second), (failure) => failure !== null);
+      // The host inspected the callback-only fixture source and observed the actual first handler's completion.
+      // 宿主检查了仅含回调的夹具源码，并观测实际首处理器完成。
+      const resolution = { resolution_id: "capacity-audit", resolver: "trusted-test-host", evidence: "fixture:joined-callback-and-no-other-effects", execution: "observed_terminal", effects: "committed", host_effects: history.snapshot.host_effects.map((effect) => ({ effect_id: effect.effect_id, effects: "committed", evidence: "fixture:actual-handler-completed" })) };
+      // Repair capacity through public work commands while the failed operation remains owned.
+      // 失败操作仍被拥有时，通过公开工作命令修复容量。
+      const revision = await consume(runtime.historyReconcile(namespace, first.operationId, history.revision, resolution));
+      await consume(runtime.historyForget(namespace, first.operationId, revision));
+      // Capacity repair does not automatically retry the original checkpoint.
+      // 修复容量不自动重试原检查点。
+      const repairedFailure = await availableFailure(second);
+      // Only persistence is retried; the original business failure remains the result.
+      // 仅重试持久化；原业务失败仍为结果。
+      const requested = await consume(second.retryCheckpoint());
+      // Waiting observes the exact same operation after its original checkpoint is durable.
+      // 等待观测原检查点持久化后的精确同一操作。
+      const done = await second.wait();
+      assert.equal(firstDone.value, "committed-once");
+      assert.deepEqual(history.snapshot, firstDone);
+      assert.equal(firstDone.host_effects.length, 1);
+      assert.ok(firstDone.host_effects.every((effect) => effect.effects === "committed"));
+      assert.deepEqual(calls, [first.operationId]);
+      assert.equal(failure.operation_id, second.operationId);
+      assert.equal(failure.error.code, "capacity_exceeded");
+      assert.equal(failure.retry, "waiting");
+      assert.deepEqual(repairedFailure, failure);
+      assert.equal(requested, true);
+      assert.equal(done.phase, "failed");
+      assert.equal(done.error.code, "capacity_exceeded");
+      // Retirement of an already initialized VM conservatively retains unknown aggregate effects.
+      // 已初始化 VM 退役保守地保留未知聚合副作用。
+      assert.equal(done.effects, "unknown");
+      assert.deepEqual(done.host_effects, []);
+      assert.equal(await availableFailure(second), null);
+      // The trusted fixture host also verified this VM's retirement has no additional external effects.
+      // 可信夹具宿主也核实此 VM 退役没有额外外部副作用。
+      const failedHistory = await consume(runtime.historyGet(namespace, second.operationId));
+      assert.deepEqual(failedHistory.snapshot, done);
+      await consume(second.forget());
+      // Final audit leaves the original failed result unchanged.
+      // 最终审计保留原失败结果不变。
+      const failedRevision = await consume(runtime.historyReconcile(namespace, second.operationId, failedHistory.revision, { resolution_id: "failed-capacity-audit", resolver: "trusted-test-host", evidence: "fixture:retired-vm-without-finalizers-or-new-effects", execution: "observed_terminal", effects: "not_applicable", host_effects: [] }));
+      await consume(runtime.historyForget(namespace, second.operationId, failedRevision));
+    } finally { await pump.close(); }
+  }, { driverConfig, persistent: true, journalMaxRecords: 1 });
+});
+
 test("typed shared pools preserve native values, errors, accounting and separate receipt forgetting", native, async () => {
   await withClient(async ({ runtime, driver, moduleDefinition, poolPolicy, pluginConfig }) => {
     const plugin = await consume(runtime.registerPlugin("typescript-second", pluginConfig));

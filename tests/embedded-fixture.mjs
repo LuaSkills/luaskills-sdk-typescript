@@ -39,7 +39,7 @@ export async function poll(read, complete) {
  * @returns {Promise<void>} Resolves only after native runtime removal and transport release.
  * 仅在原生运行时移除及传输释放后完成。
  */
-export async function withRuntime(action, { driverConfig = null, transportConfig = budgets, persistent = false } = {}) {
+export async function withRuntime(action, { driverConfig = null, transportConfig = budgets, persistent = false, journalMaxRecords = 16 } = {}) {
   const root = mkdtempSync(join(tmpdir(), "luaskills-embedded-ts-"));
   const pluginId = "typescript-embedded-test";
   const systemRoot = join(root, "system_lua_lib");
@@ -70,7 +70,7 @@ export async function withRuntime(action, { driverConfig = null, transportConfig
       // 外观携带与核心 ABI 相同的显式路径和预算声明。
       const pending = new EmbeddedClient(driver).runtime(runtimeId).initialize(engineOptions, limits, {
         path: join(root, "operations.db"),
-        journal: { max_records: 16, max_record_bytes: 32768, max_database_bytes: 262144 },
+        journal: { max_records: journalMaxRecords, max_record_bytes: 32768, max_database_bytes: 262144 },
         worker: { max_pending_writes: 8, max_pending_bytes: 131072 },
       });
       try { await pending.result(); } finally { pending.forget(); }
