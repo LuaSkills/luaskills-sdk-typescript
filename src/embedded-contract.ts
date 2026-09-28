@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "3db021e06afb4aee8ac00100db2a5ba20e29cb68cb43d5461a1770b9fd2e2b86" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "81d4cde84ad30d44c55aec846ce689979bc5dbd430b01d5a27f30ce235e33cd8" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -2031,6 +2031,11 @@ export type OutputHostEffectPhase = ("prepared" | "running" | "completed");
  * 独立于返回 Lua 的值保留的有界证据。
  */
 export type OutputHostEffectRecord = ({
+/**
+ * Original host-bound caller identity, retained for reconciliation without consulting a newer plugin generation.
+ * 原始宿主绑定调用身份；对账保留该身份，不查询较新的插件代次。
+ */
+"caller": OutputCapabilityCaller;
 /**
  * Public capability name, excluding business arguments and credentials.
  * 公开能力名称，不包含业务参数与凭证。

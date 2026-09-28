@@ -73,6 +73,9 @@ test("automatic callbacks preserve exact authority, explicit effects, nulls and 
     assert.equal(done.value.value.arg.plugin_id, "forged");
     assert.equal(done.value.value.float.value, 1e100);
     assert.equal(done.value.value.empty, null);
+    // Compare every historical authority field with the actual callback, excluding the forged business argument.
+    // 对照真实回调比较每个历史权威字段，排除伪造业务参数。
+    assert.deepEqual(done.host_effects.find((effect) => effect.request_id === retainedContext.requestId).caller, retainedContext.caller);
     assert.ok(done.host_effects.some((effect) => effect.effects === "committed"));
     assert.throws(() => retainedContext.reportEffects("rolled_back"), /sealed/);
     await pump.unregister(identities[0]);
