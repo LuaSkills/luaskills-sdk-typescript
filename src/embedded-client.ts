@@ -183,8 +183,17 @@ export class EmbeddedRuntime {
   historyNext(after: wire.InputHistoryCursor | null = null): EmbeddedPending<wire.OutputJournalOperation | null> {
     return this.request({ type: "history_next", after }, "work");
   }
-  /** Delete reconciled terminal history at expectedRevision; forget any retained live operation first.
-   * 按 expectedRevision 删除已对账终态历史；需先遗忘仍保留的活动操作。
+  /** Attach final trusted-host resolution to exact original history and return its durable successor revision.
+   * 为精确原历史附加最终可信宿主 resolution，并返回其持久后继修订。
+   * The host must authorize the resolver, verify every effect and prove all original owners stopped.
+   * 宿主必须授权对账者、核验全部副作用并证明所有原所有者已停止。
+   * Exact retries retain expectedRevision and every resolution field; retained live operations are rejected.
+   * 精确重试保留 expectedRevision 及全部 resolution 字段；仍保留的活动操作被拒绝。 */
+  historyReconcile(historyRuntimeId: string, operationId: string, expectedRevision: wire.EmbeddedInteger, resolution: wire.InputOperationReconciliation): EmbeddedPending<wire.EmbeddedInteger> {
+    return this.request({ type: "history_reconcile", history_runtime_id: historyRuntimeId, operation_id: operationId, expected_revision: expectedRevision, resolution }, "work");
+  }
+  /** Delete fully resolved history at expectedRevision; forget any retained live operation first.
+   * 按 expectedRevision 删除已完全解决的历史；需先遗忘仍保留的活动操作。
    * Return the deletion receipt; stale revisions and unresolved effects preserve the record.
    * 返回删除回执；过期修订和未决副作用保留记录。 */
   historyForget(historyRuntimeId: string, operationId: string, expectedRevision: wire.EmbeddedInteger): EmbeddedPending<null> {

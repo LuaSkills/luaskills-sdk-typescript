@@ -91,6 +91,16 @@ test("typed durable history retains exact context and unresolved evidence", nati
     assert.deepEqual(history.snapshot, done);
     assert.deepEqual(await consume(runtime.historyNext()), history);
     assert.equal(await consume(runtime.historyNext({ runtime_id: history.runtime_id, operation_id: operation.operationId })), null);
+    // This exact fixture has been inspected by the host; successful execution alone is not audit evidence.
+    // 此精确夹具已由宿主检查；仅成功执行不是审计证据。
+    const resolution = { resolution_id: "typescript-audit", resolver: "trusted-test-host",
+      evidence: "fixture:pure-source-and-stopped-owner", execution: "observed_terminal",
+      effects: "not_applicable", host_effects: [] };
+    // Retained terminal owners still forbid administrative finalization.
+    // 仍保留的终态所有者继续禁止管理最终对账。
+    const blocked = runtime.historyReconcile(history.runtime_id, operation.operationId, history.revision, resolution);
+    await assert.rejects(blocked.result(), (error) => error.code === "busy");
+    blocked.forget();
     await consume(operation.forget());
     // Ordinary Lua success does not reconcile all possible external effects.
     // 普通 Lua 成功不表示所有可能外部副作用均已对账。
@@ -98,6 +108,18 @@ test("typed durable history retains exact context and unresolved evidence", nati
     await assert.rejects(deletion.result(), (error) => error.code === "busy");
     deletion.forget();
     assert.deepEqual(await consume(runtime.historyGet(history.runtime_id, operation.operationId)), history);
+    // Retry exactly the original predecessor and proof; only one successor may become durable.
+    // 精确重试原前驱及证明；只允许一个后继持久化。
+    const revision = await consume(runtime.historyReconcile(history.runtime_id, operation.operationId, history.revision, resolution));
+    assert.equal(BigInt(revision), BigInt(history.revision) + 1n);
+    assert.equal(await consume(runtime.historyReconcile(history.runtime_id, operation.operationId, history.revision, resolution)), revision);
+    // Preserve unknown original observations alongside separate resolved host evidence.
+    // 在独立宿主已解决证据旁保留原始未知观测。
+    const reconciled = await consume(runtime.historyGet(history.runtime_id, operation.operationId));
+    assert.deepEqual(reconciled.snapshot, history.snapshot);
+    assert.deepEqual(reconciled.reconciliation, resolution);
+    await consume(runtime.historyForget(history.runtime_id, operation.operationId, revision));
+    assert.equal(await consume(runtime.historyGet(history.runtime_id, operation.operationId)), null);
   }, { driverConfig, persistent: true });
 });
 

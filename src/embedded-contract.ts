@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "68e971c1da5ddb803713cdcf3900b1bb4a2559ad4cbc1633ed9a334fe3418fb8" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "c5d56dceebc43c1488155c324db51fdc97470eb92431cd3fce57f97e7daa80ba" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -49,7 +49,7 @@ export const EMBEDDED_ROOT_COMMANDS = Object.freeze(["describe","runtime_reserve
  * Generated wire shape for EMBEDDED_RUNTIME_COMMANDS.
  * EMBEDDED_RUNTIME_COMMANDS 的生成线形状。
  */
-export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","history_get","history_next","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
+export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
 
 /**
  * Generated wire shape for EMBEDDED_DESCRIPTION_VERSION.
@@ -67,7 +67,7 @@ export const EMBEDDED_DESCRIPTION_MAX_BYTES = 16384 as const;
  * Generated wire shape for EMBEDDED_REQUIRED_CAPABILITIES.
  * EMBEDDED_REQUIRED_CAPABILITIES 的生成线形状。
  */
-export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","live_storage_recovery_v1","strict_json_v1"] as const);
+export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","strict_json_v1"] as const);
 
 /**
  * Generated wire shape for EmbeddedNativeStatus.
@@ -551,6 +551,28 @@ export type InputHostCompletion = (({
  */
 "ok": boolean;
 }));
+
+/**
+ * Resolution for one exact original host effect; neither registration nor caller identity can be supplied anew.
+ * 一个精确原宿主副作用的结论；不得重新提供注册或调用方身份。
+ */
+export type InputHostEffectReconciliation = ({
+/**
+ * Exact effect identity from the original snapshot, in the same order as its original records.
+ * 原始快照中的精确副作用身份，顺序与其原始记录相同。
+ */
+"effect_id": string;
+/**
+ * Proven final outcome of this original effect, never a retry's outcome.
+ * 此原始副作用的已证实最终结果，绝非重试结果。
+ */
+"effects": InputResolvedEffectState;
+/**
+ * Nonempty host audit or transaction-query reference; credentials and business payloads do not belong here.
+ * 非空宿主审计或事务查询引用；此处不应包含凭证及业务载荷。
+ */
+"evidence": string;
+});
 
 /**
  * Explicit module-state lifetime selected by a validated plugin contract.
@@ -1081,6 +1103,45 @@ export type InputOperationJournalWorkerConfig = ({
 });
 
 /**
+ * One bounded, final, host-authored attestation covering execution closure and every retained effect.
+ * 一份有界、最终且由宿主编写的证明，覆盖执行关闭及每个保留副作用。
+ * This API does not authenticate the attestation; the embedding host must authorize the resolver and verify evidence.
+ * 此 API 不认证证明；嵌入宿主必须授权对账者并核验证据。
+ */
+export type InputOperationReconciliation = ({
+/**
+ * Resolved aggregate covering both recorded callbacks and any other effects from the original Lua execution.
+ * 已解决的聚合结论，覆盖记录回调及原 Lua 执行的其他副作用。
+ */
+"effects": InputResolvedEffectState;
+/**
+ * Nonempty evidence reference proving owner closure and the whole operation's external-effect conclusion.
+ * 非空证据引用，证明所有者关闭及整个操作的外部副作用结论。
+ */
+"evidence": string;
+/**
+ * Closure evidence consistent with the unchanged original execution phase.
+ * 与未改变原执行阶段一致的关闭证据。
+ */
+"execution": InputReconciledExecution;
+/**
+ * Exactly one resolution per original effect, preserving original order and known outcomes.
+ * 每个原始副作用精确一个结论，保留原始顺序及已知结果。
+ */
+"host_effects": Array<InputHostEffectReconciliation>;
+/**
+ * Stable host-assigned resolution identity, retained unchanged across observation or storage retries.
+ * 宿主分配的稳定对账身份，跨观测或存储重试保持不变。
+ */
+"resolution_id": string;
+/**
+ * Authorized host resolver identity, not a plugin-supplied authority claim or an authentication credential.
+ * 已授权宿主对账者身份，不是插件提供的权限声明或认证凭证。
+ */
+"resolver": string;
+});
+
+/**
  * Immutable capacity policy for one host-assigned plugin execution group.
  * 单个宿主分配的插件执行分组的不可变容量策略。
  */
@@ -1142,6 +1203,18 @@ export type InputPluginPoolConfig = ({
  * 容量归属，与实例复用及顺序要求相互独立。
  */
 export type InputPoolKind = ("shared" | "dedicated");
+
+/**
+ * Historical execution closure asserted by the trusted host after actual owners have stopped.
+ * 实际所有者停止后，由可信宿主断言的历史执行关闭。
+ */
+export type InputReconciledExecution = ("observed_terminal" | "stopped_without_result");
+
+/**
+ * Explicit resolved effects; unknown outcomes remain unreconciled instead of being coerced into success.
+ * 显式已解决副作用；未知结果保持未对账，不强制转为成功。
+ */
+export type InputResolvedEffectState = ("not_started" | "not_applicable" | "committed" | "rolled_back");
 
 /**
  * Generic host-side client identity information passed into the LuaSkills runtime.
@@ -1230,6 +1303,32 @@ export type InputRuntimeCommand = (({
  * type 的生成线形状。
  */
 "type": "history_next";
+}) | ({
+/**
+ * Positive original revision; exact retries must retain this predecessor and all resolution fields.
+ * 原始正修订号；精确重试必须保留此前驱及全部对账字段。
+ */
+"expected_revision": EmbeddedInteger;
+/**
+ * Original historical runtime namespace.
+ * 原始历史运行时命名空间。
+ */
+"history_runtime_id": string;
+/**
+ * Exact original operation identity.
+ * 精确原始操作身份。
+ */
+"operation_id": string;
+/**
+ * Complete host-authorized evidence; this API does not authenticate supplied resolver names.
+ * 完整宿主授权证据；此 API 不认证所提供的对账者名称。
+ */
+"resolution": InputOperationReconciliation;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "history_reconcile";
 }) | ({
 /**
  * Positive original revision required for atomic compare-and-swap removal.
@@ -2198,6 +2297,28 @@ export type OutputExecutionBackend = ("in_process" | "worker_process");
 export type OutputHostEffectPhase = ("prepared" | "running" | "completed");
 
 /**
+ * Resolution for one exact original host effect; neither registration nor caller identity can be supplied anew.
+ * 一个精确原宿主副作用的结论；不得重新提供注册或调用方身份。
+ */
+export type OutputHostEffectReconciliation = ({
+/**
+ * Exact effect identity from the original snapshot, in the same order as its original records.
+ * 原始快照中的精确副作用身份，顺序与其原始记录相同。
+ */
+"effect_id": string;
+/**
+ * Proven final outcome of this original effect, never a retry's outcome.
+ * 此原始副作用的已证实最终结果，绝非重试结果。
+ */
+"effects": OutputResolvedEffectState;
+/**
+ * Nonempty host audit or transaction-query reference; credentials and business payloads do not belong here.
+ * 非空宿主审计或事务查询引用；此处不应包含凭证及业务载荷。
+ */
+"evidence": string;
+});
+
+/**
  * Bounded evidence retained independently from values returned to Lua.
  * 独立于返回 Lua 的值保留的有界证据。
  */
@@ -2330,6 +2451,11 @@ export type OutputInitializationPhase = ("reserved" | "initializing" | "ready" |
  * 历史检查点，不是活动句柄，也不是授权执行重放的证据。
  */
 export type OutputJournalOperation = ({
+/**
+ * Separate final host attestation; the original snapshot remains unchanged, including unknown results.
+ * 独立最终宿主证明；原始快照保持不变，包括未知结果。
+ */
+"reconciliation": (OutputOperationReconciliation | null);
 /**
  * Monotonic compare-and-swap revision; positive and bounded by SQLite's signed integer.
  * 单调比较交换修订号；为正数且受 SQLite 有符号整数范围约束。
@@ -2473,6 +2599,45 @@ export type OutputOperationReceipt = ({
 } & Record<string, EmbeddedJsonValue>);
 
 /**
+ * One bounded, final, host-authored attestation covering execution closure and every retained effect.
+ * 一份有界、最终且由宿主编写的证明，覆盖执行关闭及每个保留副作用。
+ * This API does not authenticate the attestation; the embedding host must authorize the resolver and verify evidence.
+ * 此 API 不认证证明；嵌入宿主必须授权对账者并核验证据。
+ */
+export type OutputOperationReconciliation = ({
+/**
+ * Resolved aggregate covering both recorded callbacks and any other effects from the original Lua execution.
+ * 已解决的聚合结论，覆盖记录回调及原 Lua 执行的其他副作用。
+ */
+"effects": OutputResolvedEffectState;
+/**
+ * Nonempty evidence reference proving owner closure and the whole operation's external-effect conclusion.
+ * 非空证据引用，证明所有者关闭及整个操作的外部副作用结论。
+ */
+"evidence": string;
+/**
+ * Closure evidence consistent with the unchanged original execution phase.
+ * 与未改变原执行阶段一致的关闭证据。
+ */
+"execution": OutputReconciledExecution;
+/**
+ * Exactly one resolution per original effect, preserving original order and known outcomes.
+ * 每个原始副作用精确一个结论，保留原始顺序及已知结果。
+ */
+"host_effects": Array<OutputHostEffectReconciliation>;
+/**
+ * Stable host-assigned resolution identity, retained unchanged across observation or storage retries.
+ * 宿主分配的稳定对账身份，跨观测或存储重试保持不变。
+ */
+"resolution_id": string;
+/**
+ * Authorized host resolver identity, not a plugin-supplied authority claim or an authentication credential.
+ * 已授权宿主对账者身份，不是插件提供的权限声明或认证凭证。
+ */
+"resolver": string;
+});
+
+/**
  * Bounded operation snapshot suitable for direct serialization to every SDK.
  * 适合直接序列化给各 SDK 的有界操作快照。
  */
@@ -2564,6 +2729,12 @@ export type OutputPoolUsage = ({
 } & Record<string, EmbeddedJsonValue>);
 
 /**
+ * Historical execution closure asserted by the trusted host after actual owners have stopped.
+ * 实际所有者停止后，由可信宿主断言的历史执行关闭。
+ */
+export type OutputReconciledExecution = ("observed_terminal" | "stopped_without_result");
+
+/**
  * Exact identities from one atomic host capability publication.
  * 单次原子宿主能力发布的精确身份。
  */
@@ -2574,6 +2745,12 @@ export type OutputRegistrationReceipt = ({
  */
 "registration_ids": Array<string>;
 } & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Explicit resolved effects; unknown outcomes remain unreconciled instead of being coerced into success.
+ * 显式已解决副作用；未知结果保持未对账，不强制转为成功。
+ */
+export type OutputResolvedEffectState = ("not_started" | "not_applicable" | "committed" | "rolled_back");
 
 /**
  * Exact lifecycle identity returned before or after a runtime control mutation.
@@ -3128,6 +3305,28 @@ export type OutputRuntimeHistoryNextResponse = ({
  * 借用结果，其所有者跨序列化存活。
  */
 "result": (OutputJournalOperation | null);
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeHistoryReconcileResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": EmbeddedInteger;
 /**
  * Exact success discriminator.
  * 精确成功判别。
@@ -3772,6 +3971,11 @@ export type EmbeddedRuntimeResponseMap = {
  * history_next 的生成线形状。
  */
 "history_next": OutputRuntimeHistoryNextResponse;
+/**
+ * Generated wire shape for history_reconcile.
+ * history_reconcile 的生成线形状。
+ */
+"history_reconcile": OutputRuntimeHistoryReconcileResponse;
 /**
  * Generated wire shape for host_request_complete.
  * host_request_complete 的生成线形状。
