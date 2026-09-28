@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "81d4cde84ad30d44c55aec846ce689979bc5dbd430b01d5a27f30ce235e33cd8" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "e85a237140e8d6d761b69d3bde97e05e290630eec463f1127c4a6a2b7ef888fc" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -413,8 +413,8 @@ export type InputEmbeddedPluginConfig = ({
  */
 export type InputEmbeddedRuntimeConfig = ({
 /**
- * Maximum serialized effect metadata bytes retained by one operation.
- * 单次操作保留的副作用元数据序列化字节上限。
+ * Maximum serialized module context and effect metadata bytes retained by one operation.
+ * 单次操作保留的模块上下文及副作用元数据序列化字节上限。
  */
 "max_effect_bytes_per_operation": EmbeddedInteger;
 /**
@@ -2155,6 +2155,44 @@ export type OutputHostRequestStatus = ({
 export type OutputInitializationPhase = ("reserved" | "initializing" | "ready" | "failed" | "faulted");
 
 /**
+ * Explicit operation origin; unbound low-level work is never inferred to belong to a current plugin.
+ * 明确的操作来源；未绑定的低层工作绝不被推断归属于当前插件。
+ */
+export type OutputOperationContext = (({
+/**
+ * Generated wire shape for kind.
+ * kind 的生成线形状。
+ */
+"kind": "unbound";
+}) | ({
+/**
+ * Original trusted caller shared by initialization and this operation's host callbacks.
+ * 初始化及此操作宿主回调共同使用的原始可信调用方。
+ */
+"caller": OutputCapabilityCaller;
+/**
+ * Exact capability membership snapshot frozen when the pool was registered.
+ * 注册池时冻结的精确能力成员快照。
+ */
+"capability_revision": string;
+/**
+ * Requested declared export; absent only for a fixed-session opening operation.
+ * 请求的已声明导出；仅固定会话开启操作省略。
+ */
+"export": (string | null);
+/**
+ * Generated wire shape for kind.
+ * kind 的生成线形状。
+ */
+"kind": "module";
+/**
+ * Exact retained pool identity, not a lookup of the plugin's newest pool.
+ * 精确保留池身份，不查询插件最新的池。
+ */
+"pool_id": string;
+}));
+
+/**
  * Execution phase; cancellation intent is reported separately from actual termination.
  * 执行阶段；取消意图与实际终止分开报告。
  */
@@ -2182,6 +2220,11 @@ export type OutputOperationSnapshot = ({
  * 是否已请求协作取消。
  */
 "cancellation_requested": boolean;
+/**
+ * Admission-time module authority, or an explicit unbound low-level origin; never reconstructed from effects.
+ * 入场时模块权威，或明确未绑定的低层来源；绝不从副作用重建。
+ */
+"context": OutputOperationContext;
 /**
  * Explicit effect status; successful execution does not automatically imply commit.
  * 显式副作用状态；执行成功不自动表示提交。

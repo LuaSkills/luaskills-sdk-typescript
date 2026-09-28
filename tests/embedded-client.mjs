@@ -70,6 +70,13 @@ test("typed shared pools preserve native values, errors, accounting and separate
       const result = await operation.wait();
       assert.equal(result.phase, "succeeded");
       assert.deepEqual(result.value, { n: index + 1, a: value });
+      assert.equal(result.context.kind, "module");
+      assert.equal(result.context.pool_id, pool.poolId);
+      assert.equal(result.context.caller.plugin_id, definition.plugin_id);
+      assert.equal(result.context.caller.package_generation, definition.generation);
+      assert.equal(result.context.caller.operation_id, operation.operationId);
+      assert.equal(result.context.export, "call");
+      assert.deepEqual(result.host_effects, []);
       assert.equal((await consume(operation.status())).operation_id, operation.operationId);
       await consume(operation.forget());
       const missing = operation.status();
@@ -97,11 +104,23 @@ test("typed dedicated fixed sessions preserve one Lua state through explicit clo
   await withClient(async ({ runtime, moduleDefinition, poolPolicy }) => {
     const pool = await consume(runtime.registerPool(moduleDefinition("local n=0; return {call=function(a) n=n+1; return n end}"), { ...poolPolicy, kind: "dedicated", reuse: "session", serial: true, max_running_calls: 1 }, [], "typescript-session-v1"));
     const opened = await consume(pool.openSession(10000));
-    assert.equal((await opened.initialization.wait()).phase, "succeeded");
+    // Opening retains a module context even before any exported operation or host callback exists.
+    // 在任何导出操作或宿主回调存在前，开启操作已保留模块上下文。
+    const initialized = await opened.initialization.wait();
+    assert.equal(initialized.phase, "succeeded");
+    assert.equal(initialized.context.kind, "module");
+    assert.equal(initialized.context.caller.session_id, opened.session.sessionId);
+    assert.equal(initialized.context.export, null);
     assert.equal((await consume(opened.session.status())).phase, "ready");
     for (const expected of [1, 2]) {
       const operation = await consume(opened.session.submit("call", null, invocation, 10000));
-      assert.equal((await operation.wait()).value, expected);
+      // Read the actual pinned-session identity through the typed operation response.
+      // 通过类型化操作响应读取真实固定会话身份。
+      const completed = await operation.wait();
+      assert.equal(completed.value, expected);
+      assert.equal(completed.context.caller.session_id, opened.session.sessionId);
+      assert.equal(completed.context.caller.operation_id, operation.operationId);
+      assert.equal(completed.context.export, "call");
       await consume(operation.forget());
     }
     await consume(opened.initialization.forget());
