@@ -167,7 +167,7 @@ export class EmbeddedRuntimeScope {
       this.#failure = error instanceof Error ? error : new Error(String(error));
       const capacityRejected = error instanceof EmbeddedTransportError && error.functionName === "luaskills_ffi_embedded_request_v1" && error.status === EmbeddedNativeStatus.CAPACITY_EXCEEDED;
       this.#retryable = this.#phase !== "startup_failed" && this.#executor.status.failure === null
-        && (this.#needsRelease || this.#pending !== null || capacityRejected || (this.#phase === "draining_callbacks" && this.#pump !== null && this.#pump.recoveryRequired));
+        && (this.#needsRelease || this.#pending !== null || capacityRejected || ((this.#phase === "draining_callbacks" || this.#phase === "draining_runtime") && this.#pump !== null && this.#pump.recoveryRequired));
       attempt.reject(error);
     });
     return attempt.promise;
@@ -252,7 +252,21 @@ export class EmbeddedRuntimeScope {
       if (this.#pending !== null && this.#pending.consumed) this.clearPending();
     }
     if (this.#phase === "open") this.#phase = "closing_runtime";
-    if (this.#phase === "closing_runtime") await this.control("runtime_close", () => { this.#phase = "draining_callbacks"; });
+    if (this.#phase === "closing_runtime") await this.control("runtime_close", () => { this.#phase = "draining_runtime"; });
+    if (this.#phase === "draining_runtime") {
+      // Keep callback delivery available until automatic finalizers and actual core ownership drain.
+      // 自动关闭函数和真实核心所有权排空前，保持回调交付可用。
+      if (retry && this.#pump !== null && this.#pump.recoveryRequired) await this.#pump.retryAcknowledgements();
+      while (this.#phase === "draining_runtime") {
+        if (this.#pump !== null && this.#pump.recoveryRequired) throw new Error("Callback pump requires explicit delivery recovery before runtime release");
+        await this.control("runtime_status", (value) => {
+          const snapshot = value as OutputRuntimeSnapshot;
+          if (snapshot.initialization === "faulted") throw new Error("Faulted initialization prevents proving safe runtime release");
+          if (snapshot.closed) this.#phase = "draining_callbacks";
+        });
+        if (this.#phase === "draining_runtime") await pauseEmbeddedPoll(this.#pollIntervalMs);
+      }
+    }
     if (this.#phase === "draining_callbacks") {
       if (this.#pump !== null) {
         if (retry && !this.#pump.status.closed && this.#pump.recoveryRequired) await this.#pump.retryAcknowledgements();
@@ -266,17 +280,7 @@ export class EmbeddedRuntimeScope {
         await closing;
         if (failure !== null) throw failure;
       }
-      this.#phase = "draining_runtime";
-    }
-    if (this.#phase === "draining_runtime") {
-      while (this.#phase === "draining_runtime") {
-        await this.control("runtime_status", (value) => {
-          const snapshot = value as OutputRuntimeSnapshot;
-          if (snapshot.initialization === "faulted") throw new Error("Faulted initialization prevents proving safe runtime release");
-          if (snapshot.closed) this.#phase = "releasing_runtime";
-        });
-        if (this.#phase === "draining_runtime") await pauseEmbeddedPoll(this.#pollIntervalMs);
-      }
+      this.#phase = "releasing_runtime";
     }
     if (this.#phase === "releasing_runtime") {
       while (this.#phase === "releasing_runtime") {

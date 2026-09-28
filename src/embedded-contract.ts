@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "9d7a26f6b954eee37e517f2d2b5a1057c8a88dd1eb714d7ce2fe2c9059827a69" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "ccb8c75c26b271cdcb90d75d7d724ed7f38624cb4cc63663282f82878a8ee4d9" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -1005,6 +1005,11 @@ export type InputModuleDefinition = ({
  */
 "exports": Array<InputModuleExport>;
 /**
+ * Optional host-owned closing declaration for supported scheduled lifecycles.
+ * 可选的宿主所有关闭声明，用于受支持的调度生命周期。
+ */
+"finalizer"?: (InputModuleFinalizer | null);
+/**
  * Host-assigned immutable code and dependency generation.
  * 宿主分配的不可变代码与依赖代次。
  */
@@ -1061,6 +1066,28 @@ export type InputModuleExport = ({
  * 结构化返回值的离线 Draft 2020-12 Schema。
  */
 "output_schema": EmbeddedJsonValue;
+});
+
+/**
+ * Immutable closing export, arguments and independent finite execution budget.
+ * 不可变关闭导出、参数及独立有限执行预算。
+ */
+export type InputModuleFinalizer = ({
+/**
+ * Structured closing input validated at registration and again before execution.
+ * 在注册时及执行前再次校验的结构化关闭输入。
+ */
+"arguments": EmbeddedJsonValue;
+/**
+ * Exact name already present in the module's declared exports.
+ * 已存在于模块声明导出中的精确名称。
+ */
+"export": string;
+/**
+ * Finite milliseconds starting at closing execution admission, independent from business cancellation.
+ * 从关闭执行入场开始计时的有限毫秒数，独立于业务取消。
+ */
+"timeout_ms": EmbeddedInteger;
 });
 
 /**
@@ -2518,6 +2545,33 @@ export type OutputOperationContext = (({
 }));
 
 /**
+ * Durable closing intent and separate outcomes within one original operation identity.
+ * 同一原始操作身份中的持久关闭意图与独立结果。
+ */
+export type OutputOperationFinalization = ({
+/**
+ * Bounded original business result retained even if closing fails.
+ * 即使关闭失败也保留的有界原始业务结果。
+ */
+"business": OutputOperationOutcome;
+/**
+ * Frozen number of ordered host effects admitted before the closing phase.
+ * 关闭阶段前接纳的有序宿主副作用的冻结数量。
+ */
+"business_effect_count": EmbeddedInteger;
+/**
+ * Exact host-selected declared export; absence of an outcome is not proof it never ran.
+ * 宿主选择的精确声明导出；缺少结果不能证明其从未运行。
+ */
+"export": string;
+/**
+ * Actual closing result; omitted until the owner records a returned outcome.
+ * 实际关闭结果；所有者记录已返回结果前省略。
+ */
+"outcome"?: (OutputOperationOutcome | null);
+});
+
+/**
  * Live worker observations; retained receipts keep quota even after the thread has finished.
  * 实时工作线程观测；线程结束后，保留的回执仍占有配额。
  */
@@ -2558,6 +2612,34 @@ export type OutputOperationJournalWorkerStatus = ({
  */
 "writing": boolean;
 } & Record<string, EmbeddedJsonValue>);
+
+/**
+ * One bounded execution outcome; explicit JSON null remains a successful value.
+ * 一项有界执行结果；显式 JSON 空值仍为成功值。
+ */
+export type OutputOperationOutcome = (({
+/**
+ * Generated wire shape for status.
+ * status 的生成线形状。
+ */
+"status": "succeeded";
+/**
+ * Exact successful JSON value, including explicit null.
+ * 精确成功 JSON 值，包含显式空值。
+ */
+"value": EmbeddedJsonValue;
+}) | ({
+/**
+ * Structured stage error independent of side-effect evidence.
+ * 独立于副作用证据的结构化阶段错误。
+ */
+"error": OutputEmbeddedError;
+/**
+ * Generated wire shape for status.
+ * status 的生成线形状。
+ */
+"status": "failed";
+}));
 
 /**
  * A failed checkpoint remains queryable by exact operation ID until that original checkpoint is acknowledged.
@@ -2668,6 +2750,11 @@ export type OutputOperationSnapshot = ({
  * 结构化终态错误；执行仍在进行时省略。
  */
 "error"?: (OutputEmbeddedError | null);
+/**
+ * Closing intent and separate stage results, absent when no explicit finalization was prepared.
+ * 关闭意图及独立阶段结果；未准备显式关闭时省略。
+ */
+"finalization"?: (OutputOperationFinalization | null);
 /**
  * Exact host callback evidence retained even after Lua failure, cancellation or output rejection.
  * 即使 Lua 失败、取消或输出被拒绝也保留的精确宿主回调证据。

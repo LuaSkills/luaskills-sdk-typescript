@@ -7,6 +7,31 @@ import { EmbeddedTransport, EmbeddedFloat, EmbeddedNativeStatus, EmbeddedRuntime
 const native = { skip: !process.env.LUASKILLS_LIB };
 import { budgets, poll, withRuntime } from "./embedded-fixture.mjs";
 
+// Consume automatic closing from the actual DLL, preserving null and an independent closing failure.
+// 从实际 DLL 消费自动关闭，保留空值及独立的关闭失败。
+test("automatic finalization preserves both real Lua outcomes", native, async () => {
+  await withRuntime(async ({ command, moduleDefinition, poolPolicy, submit, terminal }) => {
+    const definition = moduleDefinition("local called=false; local fail=false; return {call=function(a) called=true; fail=a; return nil end, shutdown=function() assert(called); if fail then error('closing failed') end; return nil end}");
+    definition.exports.push({ name: "shutdown", input_schema: true, output_schema: true });
+    definition.finalizer = { export: "shutdown", arguments: null, timeout_ms: 1000 };
+    const poolId = command({ type: "pool_register", definition, policy: { ...poolPolicy, reuse: "single_call" }, permissions: ["typescript.host"], execution_revision: "typescript-v1" }).pool_id;
+    for (const fail of [false, true]) {
+      const snapshot = await terminal(submit(poolId, fail));
+      assert.equal(snapshot.phase, fail ? "failed" : "succeeded");
+      assert.deepEqual(snapshot.finalization.business, { status: "succeeded", value: null });
+      assert.equal(snapshot.finalization.business_effect_count, 0);
+      if (fail) {
+        assert.equal(snapshot.finalization.outcome.status, "failed");
+        assert.deepEqual(snapshot.finalization.outcome.error, snapshot.error);
+      } else {
+        assert.deepEqual(snapshot.finalization.outcome, { status: "succeeded", value: null });
+        assert.ok(Object.hasOwn(snapshot, "value"));
+        assert.equal(snapshot.value, null);
+      }
+    }
+  });
+});
+
 test("invalid budgets fail before loading a native library", () => {
   for (const value of [0, -1, 1.5, true, Number.MAX_SAFE_INTEGER + 1, 1n << 63n]) {
     assert.throws(() => new EmbeddedTransport({ ...budgets, max_runtimes: value }, { libraryPath: "missing-library" }), /integer|uint64|isize/);

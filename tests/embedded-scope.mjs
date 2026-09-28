@@ -127,17 +127,20 @@ test("cancelled close observation preserves actual callback, late effects and ow
         return null;
       })]);
       scope = adopt(pump);
-      const pool = await consume(runtime.registerPool(moduleDefinition("return {call=function(a) return vulcan.capabilities.call('typescript.scope',a) end}"), poolPolicy, ["typescript.host"], "scope-v1"));
+      const definition = moduleDefinition("return {call=function(a) return vulcan.capabilities.call('typescript.scope',a) end, shutdown=function() local r=vulcan.capabilities.call('typescript.scope','closing'); assert(r.ok); return r.value end}");
+      definition.exports.push({ name: "shutdown", input_schema: true, output_schema: true });
+      definition.finalizer = { export: "shutdown", arguments: null, timeout_ms: 5000 };
+      const pool = await consume(runtime.registerPool(definition, { ...poolPolicy, reuse: "single_call" }, ["typescript.host"], "scope-v1"));
       await consume(pool.submit("call", null, invocation, 10000));
       await started;
       await assert.rejects(scope.close({ signal: AbortSignal.timeout(30) }), (error) => error.name === "TimeoutError");
       await poll(() => hostContext.signal.aborted, Boolean);
-      assert.equal(scope.status.phase, "draining_callbacks");
+      assert.equal(scope.status.phase, "draining_runtime");
       assert.equal(EmbeddedRuntimeScope.live.includes(scope), true);
       assert.equal(pump.status.closed, false);
       release();
       await scope.close();
-      assert.equal(calls, 1);
+      assert.equal(calls, 2);
       assert.equal(pump.status.closed, true);
     } finally { release(); await pump.close(); }
   });
