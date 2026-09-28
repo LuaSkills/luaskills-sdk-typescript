@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "635f47f2884420e36876114474310bf197c9d2941204f626b5255f1e885c55b8" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "efc9224e7a02141c3ffd24a7bb02cf613fa4113e45ac68e81eeef12c9137a867" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -49,7 +49,7 @@ export const EMBEDDED_ROOT_COMMANDS = Object.freeze(["describe","runtime_reserve
  * Generated wire shape for EMBEDDED_RUNTIME_COMMANDS.
  * EMBEDDED_RUNTIME_COMMANDS 的生成线形状。
  */
-export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","storage_worker_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
+export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","storage_worker_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_list","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
 
 /**
  * Generated wire shape for EMBEDDED_DESCRIPTION_VERSION.
@@ -1605,6 +1605,27 @@ export type InputRuntimeCommand = (({
 "type": "session_forget";
 }) | ({
 /**
+ * Exact retained cursor from the previous page; omitted to restart enumeration.
+ * 上一页的精确保留游标；省略则重新开始枚举。
+ */
+"after_operation_id"?: (string | null);
+/**
+ * Positive maximum number of IDs, bounded by the runtime operation retention limit.
+ * 正的身份数量上限，受运行时操作保留上限约束。
+ */
+"limit": EmbeddedInteger;
+/**
+ * Optional original pool filter, valid even after that pool was forgotten.
+ * 可选原始池过滤条件，即使该池已遗忘仍有效。
+ */
+"pool_id"?: (string | null);
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "operation_list";
+}) | ({
+/**
  * Exact retained operation identity.
  * 精确保留操作身份。
  */
@@ -2543,6 +2564,11 @@ export type OutputOperationContext = (({
  */
 "export": (string | null);
 /**
+ * Original VM for an independently admitted finalization; absent for ordinary business and opening work.
+ * 独立入场关闭操作的原 VM；普通业务及开启操作省略。
+ */
+"finalization_instance_id"?: (string | null);
+/**
  * Generated wire shape for kind.
  * kind 的生成线形状。
  */
@@ -2650,6 +2676,28 @@ export type OutputOperationOutcome = (({
  */
 "status": "failed";
 }));
+
+/**
+ * One page of retained operation identities; status and effects remain queryable by each exact identity.
+ * 一页保留操作身份；状态及副作用继续通过各精确身份查询。
+ */
+export type OutputOperationPage = ({
+/**
+ * Last returned identity, or the unchanged input cursor for an empty page.
+ * 最后返回的身份；空页保留输入游标。
+ */
+"after_operation_id": (string | null);
+/**
+ * More matching retained records existed during this atomic registry observation.
+ * 此次原子注册表观测期间仍存在更多匹配保留记录。
+ */
+"has_more": boolean;
+/**
+ * Identities in admission publication order, independent of reservation and completion order.
+ * 按入场发布顺序排列的身份，独立于预留及完成顺序。
+ */
+"operation_ids": Array<string>;
+});
 
 /**
  * A failed checkpoint remains queryable by exact operation ID until that original checkpoint is acknowledged.
@@ -3551,6 +3599,28 @@ export type OutputRuntimeOperationForgetResponse = ({
  * Borrowed success envelope avoids cloning application output during native response publication.
  * 借用成功信封，避免原生响应发布期间克隆应用输出。
  */
+export type OutputRuntimeOperationListResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": OutputOperationPage;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
 export type OutputRuntimeOperationPersistenceFailureResponse = ({
 /**
  * Single protocol version authority.
@@ -4126,6 +4196,11 @@ export type EmbeddedRuntimeResponseMap = {
  * operation_forget 的生成线形状。
  */
 "operation_forget": OutputRuntimeOperationForgetResponse;
+/**
+ * Generated wire shape for operation_list.
+ * operation_list 的生成线形状。
+ */
+"operation_list": OutputRuntimeOperationListResponse;
 /**
  * Generated wire shape for operation_persistence_failure.
  * operation_persistence_failure 的生成线形状。

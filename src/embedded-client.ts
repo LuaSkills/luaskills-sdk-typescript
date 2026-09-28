@@ -259,6 +259,13 @@ export class EmbeddedRuntime {
   /** Bind known operationId and return its queryable original execution handle.
    * 绑定已知 operationId 并返回其可查询原始执行句柄。 */
   operation(operationId: string): EmbeddedOperation { return new EmbeddedOperation(this, operationId); }
+  /** Discover at most limit retained identities for optional poolId after retained afterOperationId; return publication order.
+   * 为可选 poolId 发现保留的 afterOperationId 之后至多 limit 个保留身份；返回发布顺序。
+   * Restart after forgetting a cursor; each returned identity retains independently queryable native outcomes.
+   * 遗忘游标后重新开始；每个返回身份保留可独立查询的原生结果。 */
+  listOperations(poolId: string | null, afterOperationId: string | null, limit: wire.EmbeddedInteger): EmbeddedPending<wire.OutputOperationPage> {
+    return this.request({ type: "operation_list", pool_id: poolId, after_operation_id: afterOperationId, limit }, "control");
+  }
 }
 
 /** Immutable plugin registration handle with live aggregate native accounting.

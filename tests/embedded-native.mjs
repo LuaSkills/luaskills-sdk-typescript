@@ -7,6 +7,40 @@ import { EmbeddedTransport, EmbeddedFloat, EmbeddedNativeStatus, EmbeddedRuntime
 const native = { skip: !process.env.LUASKILLS_LIB };
 import { budgets, poll, withRuntime } from "./embedded-fixture.mjs";
 
+// Discovery follows publication rather than opaque ID allocation; closing retains the original reusable VM.
+// 发现遵循发布而非不透明身份分配顺序；关闭保留原可复用 VM。
+test("reusable finalization is discoverable after newer business identities", native, async () => {
+  await withRuntime(async ({ command, moduleDefinition, poolPolicy, submit, terminal }) => {
+    // The local counter is observable proof of the retained instance across independent operations.
+    // 局部计数器是跨独立操作保留实例的可观测证据。
+    const definition = moduleDefinition("local n=0; return {call=function() n=n+1; return tostring(n) end, shutdown=function() return tostring(n) end}");
+    definition.exports.push({ name: "shutdown", input_schema: true, output_schema: true });
+    definition.finalizer = { export: "shutdown", arguments: null, timeout_ms: 1000 };
+    const poolId = command({ type: "pool_register", definition, policy: { ...poolPolicy, reuse: "reusable" }, permissions: ["typescript.host"], execution_revision: "typescript-v1" }).pool_id;
+    const business = [];
+    for (const expected of ["1", "2"]) {
+      const id = submit(poolId, null);
+      const result = await terminal(id);
+      assert.equal(result.value, expected);
+      business.push({ id, result });
+    }
+    command({ type: "pool_close", pool_id: poolId });
+    const page = await poll(() => command({ type: "operation_list", pool_id: poolId, after_operation_id: business.at(-1).id, limit: 1 }), (value) => value.operation_ids.length > 0);
+    assert.equal(page.operation_ids.length, 1);
+    const closingId = page.operation_ids[0];
+    assert.equal(page.after_operation_id, closingId);
+    const closing = await terminal(closingId);
+    assert.equal(closing.phase, "succeeded");
+    assert.match(closing.context.finalization_instance_id, /^embedded-vm:/u);
+    assert.equal(closing.context.caller.session_id, null);
+    assert.deepEqual(closing.finalization.outcome, { status: "succeeded", value: "2" });
+    for (const { id, result } of business) {
+      assert.notEqual(id, closingId);
+      assert.deepEqual(command({ type: "operation_status", operation_id: id }), result);
+    }
+  });
+});
+
 // Consume automatic closing from the actual DLL, preserving null and an independent closing failure.
 // 从实际 DLL 消费自动关闭，保留空值及独立的关闭失败。
 test("automatic finalization preserves both real Lua outcomes", native, async () => {
