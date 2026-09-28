@@ -325,6 +325,19 @@ export class EmbeddedCapacity {
   status(): EmbeddedPending<wire.OutputEmbeddedCapacitySnapshot> {
     return this.#runtime.request({ type: "capacity_status", capacity_id: this.#capacityId }, "control");
   }
+  /** Return the atomic native revision, current policy and convergence on the reserved control lane.
+   * 在预留控制通道返回原子原生修订、当前策略及收敛状态。 */
+  policy(): EmbeddedPending<wire.OutputEmbeddedCapacityPolicySnapshot> {
+    return this.#runtime.request({ type: "capacity_policy", capacity_id: this.#capacityId }, "control");
+  }
+  /** Compare expectedRevision and replace complete config; return the retained committed-token receipt.
+   * 比较 expectedRevision 并替换完整 config；返回保留的已提交令牌回执。
+   * Preserve native conflicts and closure; never refresh or retry the token automatically.
+   * 保留原生冲突及关闭；绝不自动刷新或重试令牌。 */
+  revise(expectedRevision: string, config: wire.InputEmbeddedCapacityConfig): EmbeddedPending<string> {
+    return this.#runtime.request({ type: "capacity_revise", capacity_id: this.#capacityId,
+      expected_revision: expectedRevision, config }, "control");
+  }
   /** Stop admission and request member drainage; return acknowledgement without claiming completion.
    * 停止入场并请求成员排空；返回确认，不宣称完成。 */
   requestClose(): EmbeddedPending<null> {

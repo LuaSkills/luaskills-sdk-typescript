@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "5b925a5e67d50a48a9545d57ce7119bbba9e9d46ccfc771bdc9dea2da974cc35" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "f6504bb5b89b4eecb300b805b676f4f1e7c621cae125f8de3a11aab1f9119cf5" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -49,7 +49,7 @@ export const EMBEDDED_ROOT_COMMANDS = Object.freeze(["describe","runtime_reserve
  * Generated wire shape for EMBEDDED_RUNTIME_COMMANDS.
  * EMBEDDED_RUNTIME_COMMANDS 的生成线形状。
  */
-export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","storage_worker_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","capacity_register","capacity_status","capacity_close","capacity_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_list","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
+export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","storage_worker_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","capacity_register","capacity_status","capacity_policy","capacity_revise","capacity_close","capacity_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_list","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
 
 /**
  * Generated wire shape for EMBEDDED_DESCRIPTION_VERSION.
@@ -67,7 +67,7 @@ export const EMBEDDED_DESCRIPTION_MAX_BYTES = 16384 as const;
  * Generated wire shape for EMBEDDED_REQUIRED_CAPABILITIES.
  * EMBEDDED_REQUIRED_CAPABILITIES 的生成线形状。
  */
-export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","capacity_groups_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","journal_worker_recovery_v1","strict_json_v1"] as const);
+export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","capacity_groups_v1","capacity_policy_revisions_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","journal_worker_recovery_v1","strict_json_v1"] as const);
 
 /**
  * Generated wire shape for EmbeddedNativeStatus.
@@ -1491,6 +1491,38 @@ export type InputRuntimeCommand = (({
  * Generated wire shape for type.
  * type 的生成线形状。
  */
+"type": "capacity_policy";
+}) | ({
+/**
+ * Exact runtime-issued capacity identity; never inferred from plugin name.
+ * 精确运行时签发容量身份；绝不从插件名推断。
+ */
+"capacity_id": string;
+/**
+ * Complete replacement policy validated atomically by the original scheduler and governor.
+ * 由原调度器及治理器原子校验的完整替换策略。
+ */
+"config": InputEmbeddedCapacityConfig;
+/**
+ * Exact string from capacity_policy; clients must not convert it into a numeric value.
+ * 来自 capacity_policy 的精确字符串；客户端不得将其转成数值。
+ */
+"expected_revision": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "capacity_revise";
+}) | ({
+/**
+ * Exact runtime-issued capacity identity.
+ * 精确运行时签发容量身份。
+ */
+"capacity_id": string;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
 "type": "capacity_close";
 }) | ({
 /**
@@ -2275,6 +2307,28 @@ export type OutputEmbeddedCapacityConfig = ({
  */
 "resources": OutputVmCapacityConfig;
 });
+
+/**
+ * One atomic policy revision and its actual convergence state for an exact capacity.
+ * 单个精确容量的原子策略修订及其实际收敛状态。
+ */
+export type OutputEmbeddedCapacityPolicySnapshot = ({
+/**
+ * Current policy and physical/scheduling ownership sampled under the same scheduler gate.
+ * 在同一调度门下采样的当前策略及物理／调度归属。
+ */
+"capacity": OutputEmbeddedCapacitySnapshot;
+/**
+ * Actual usage exceeds at least one current limit; existing work is still allowed to drain.
+ * 实际用量超过至少一个当前上限；既有工作仍允许排空。
+ */
+"pending_convergence": boolean;
+/**
+ * Opaque predecessor token for compare-and-swap; clients must echo it without numeric conversion.
+ * 比较交换使用的不透明前驱令牌；客户端必须原样回传，不得数值转换。
+ */
+"revision": string;
+} & Record<string, EmbeddedJsonValue>);
 
 /**
  * Actual capacity status includes physical ownership and scheduler work retained through cleanup.
@@ -3683,6 +3737,28 @@ export type OutputRuntimeCapacityForgetResponse = ({
  * Borrowed success envelope avoids cloning application output during native response publication.
  * 借用成功信封，避免原生响应发布期间克隆应用输出。
  */
+export type OutputRuntimeCapacityPolicyResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": OutputEmbeddedCapacityPolicySnapshot;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
 export type OutputRuntimeCapacityRegisterResponse = ({
 /**
  * Single protocol version authority.
@@ -3694,6 +3770,28 @@ export type OutputRuntimeCapacityRegisterResponse = ({
  * 借用结果，其所有者跨序列化存活。
  */
 "result": OutputCapacityReceipt;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
+export type OutputRuntimeCapacityReviseResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": string;
 /**
  * Exact success discriminator.
  * 精确成功判别。
@@ -4488,10 +4586,20 @@ export type EmbeddedRuntimeResponseMap = {
  */
 "capacity_forget": OutputRuntimeCapacityForgetResponse;
 /**
+ * Generated wire shape for capacity_policy.
+ * capacity_policy 的生成线形状。
+ */
+"capacity_policy": OutputRuntimeCapacityPolicyResponse;
+/**
  * Generated wire shape for capacity_register.
  * capacity_register 的生成线形状。
  */
 "capacity_register": OutputRuntimeCapacityRegisterResponse;
+/**
+ * Generated wire shape for capacity_revise.
+ * capacity_revise 的生成线形状。
+ */
+"capacity_revise": OutputRuntimeCapacityReviseResponse;
 /**
  * Generated wire shape for capacity_status.
  * capacity_status 的生成线形状。

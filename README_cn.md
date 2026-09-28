@@ -68,6 +68,8 @@ JavaScript 处理器在拥有泵的 Node 事件循环运行；同步处理器必
 
 `runtime.registerCapacity(pluginId, config)` 返回待确认的 `EmbeddedCapacity`；`runtime.capacity(capacityId)` 绑定精确已知身份。显式提供 `resources`、`max_queued_calls` 和 `max_queued_bytes`。`capacity.registerPool(...)` 要求相同插件归属、池类别、成员最小值为零且上限不超过容量。成员共享聚合预留及入场额度，Lua 状态、模块代次及能力快照各自独立；既有 `runtime.registerPool(...)` 保持独立归属。`status()`、`requestClose()` 和 `forget()` 使用预留控制通道。关闭会排空成员，必须逐个遗忘已关闭且排空的成员后才能遗忘容量；空容量仍保留最小预留，不会自动预热 VM。此开发功能要求匹配的 `capacity_groups_v1` 契约及原生库。
 
+`policy()` 原子返回当前修订字符串、完整容量状态及 `pending_convergence`；`revise(expectedRevision, config)` 使用该精确前驱和完整配置进行比较交换，返回新的字符串令牌。两项均走保留控制通道并返回可查询回执；令牌不得转成数值，SDK 不自动重试冲突。旧前驱或执行上限低于已分发操作数量返回 `busy`，不改变策略。常驻／队列缩容可保留超额实际占用并报告待收敛；固定会话保留原 VM 状态，常驻缩容会沿原清理路径退役可复用缓存。关闭后仍可查询但禁止修订；回执需显式遗忘。此开发接口要求匹配的 `capacity_policy_revisions_v1` 契约与原生库，尚未正式发布。
+
 `operation.wait({ signal, pollIntervalMs })` 使用预留控制通道轮询真实核心快照，仅自动消费成功的只读查询回执，并返回含副作用证据的成功、失败或取消终态。使用 `AbortSignal`（包括 `AbortSignal.timeout`）限制观察时长，不会因此取消原生执行。`operation.cancel()` 独立请求协作取消；`operation.forget()` 移除核心记录，与遗忘 SDK 回执相互独立。中断或失败的查询仍可通过 `driver.commands` 找回。轮询在入场前校验正整数定时器边界；实现受控依赖跟踪前，宿主回调中的普通驱动器及生命周期等待明确返回不支持，包括跨运行时等待。
 
 现有 `createEngineOptions()` 已可与生成的嵌入式输入契约组合使用。其 JSON 选项结构调整为结构化类型别名，不再支持对原接口进行声明合并；缓存配置使用生成契约中的三个数字字段，不接受任意 JSON。完整显式引擎选项必须提供 `enable_managed_io_compat`；构建器仍允许部分覆盖，并按现有规则合并嵌套能力及控制器默认值。旧 JSON 选项继续使用 `number`，需要精确 bigint 预算时使用生成的嵌入式类型。这些是后续统一版本的开发迁移变化，不代表已发布 0.5.7 动态库已更新。

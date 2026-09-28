@@ -40,6 +40,111 @@ async function withClient(action) {
   }, { driverConfig });
 }
 
+// Exact native policy revisions remain reachable when work receipts and VM capacity are exhausted.
+// 精确原生策略修订在工作回执及 VM 容量耗尽时仍可达。
+test("typed capacity revisions preserve pinned state and control admission", native, async () => {
+  await withClient(async ({ runtime, runtimeConfig, pluginId, moduleDefinition, poolPolicy }) => {
+    // The explicit capacity derives its ceilings from the actual native fixture.
+    // 显式容量从实际原生夹具派生上限。
+    const config = { resources: { kind: "shared", min_resident_vms: 0,
+      max_resident_vms: runtimeConfig.max_resident_vms, max_running_calls: 1 },
+      max_queued_calls: runtimeConfig.max_queued_calls, max_queued_bytes: runtimeConfig.max_queued_bytes };
+    // Keep one exact capacity identity across all accepted and rejected commands.
+    // 在全部被接纳及拒绝命令中保持同一精确容量身份。
+    const capacity = await consume(runtime.registerCapacity(pluginId, config));
+    // Each fixed instance owns independent state even after its aggregate budget changes.
+    // 即使聚合预算变化，各固定实例仍拥有独立状态。
+    const definition = moduleDefinition(`-- Retain private state in this fixed VM.
+-- 在此固定 VM 中保留私有状态。
+local count=0
+return {
+-- Advance this instance's counter.
+-- 递增此实例的计数器。
+call=function() count=count+1; return count end}`);
+    // The module declaration stays immutable across later capacity revisions.
+    // 模块声明在后续容量修订中保持不可变。
+    const pool = await consume(capacity.registerPool(definition,
+      { ...poolPolicy, ...config.resources, reuse: "session" }, [], "policy-v1"));
+    // All original sessions remain bound to their original real VM.
+    // 全部原会话保持绑定各自原真实 VM。
+    const sessions = [];
+    for (let index = 0; index < config.resources.max_resident_vms; index += 1) {
+      // Session reservation alone does not prove initialization success.
+      // 仅会话预留不能证明初始化成功。
+      const opening = await consume(pool.openSession(5000));
+      assert.equal((await opening.initialization.wait()).phase, "succeeded");
+      await consume(opening.initialization.forget());
+      sessions.push(opening.session);
+    }
+    // Failed retained work receipts consume the configured lane without allocating extra VMs.
+    // 失败保留工作回执消费配置通道，不分配额外 VM。
+    const held = [];
+    for (let index = 0; index < driverConfig.maxWorkCommands; index += 1) {
+      // Keep native capacity rejection observable until the explicit release below.
+      // 下方明确释放前，保持原生容量拒绝可观察。
+      const rejected = pool.openSession(5000);
+      await assert.rejects(rejected.result(), (error) => error.code === "capacity_exceeded");
+      held.push(rejected);
+    }
+    assert.throws(() => pool.openSession(5000), {
+      name: "RangeError", message: "Embedded work command receipt capacity exceeded",
+    });
+    // Atomic query and revision must bypass the saturated work lane.
+    // 原子查询及修订必须避开已饱和工作通道。
+    const query = capacity.policy();
+    assert.equal(query.receipt.lane, "control");
+    // Preserve the original opaque predecessor without numeric conversion.
+    // 保留原不透明前驱，不进行数值转换。
+    const before = await consume(query);
+    assert.equal(typeof before.revision, "string");
+    // The original two pinned VMs exceed this valid dedicated target.
+    // 原两个固定 VM 超过此合法专用目标。
+    const target = { ...config, resources: { ...config.resources, kind: "dedicated",
+      min_resident_vms: 1, max_resident_vms: 1 } };
+    // Mutation is short control work but still respects native shutdown fencing.
+    // 变更是短时控制工作，但仍遵守原生关闭屏障。
+    const change = capacity.revise(before.revision, target);
+    assert.equal(change.receipt.lane, "control");
+    // Only native acknowledgement proves policy publication.
+    // 仅原生确认能证明策略发布。
+    const revision = await consume(change);
+    assert.equal(typeof revision, "string");
+    assert.notEqual(revision, before.revision);
+    // A stale request never silently retries against another writer's policy.
+    // 过期请求绝不针对另一写入者的策略静默重试。
+    const stale = capacity.revise(before.revision, config);
+    await assert.rejects(stale.result(), (error) => error.code === "busy");
+    stale.forget();
+    // Current status retains real occupancy rather than reporting the smaller desired amount.
+    // 当前状态保留真实占用，不报告更小期望数量。
+    const pending = await consume(capacity.policy());
+    assert.equal(pending.revision, revision);
+    assert.deepEqual(pending.capacity.config, target);
+    assert.equal(pending.capacity.resources.resident, sessions.length);
+    assert.equal(pending.pending_convergence, true);
+    for (const receipt of held) receipt.forget();
+    for (const session of sessions) {
+      for (const expected of [1, 2]) {
+        // The original fixed state survives the quota shrink.
+        // 原固定状态在额度缩减后保留。
+        const operation = await consume(session.submit("call", null, invocation, 5000));
+        assert.equal((await operation.wait()).value, expected);
+        await consume(operation.forget());
+      }
+      await consume(session.requestClose());
+    }
+    await poll(() => consume(capacity.policy()), (status) => status.capacity.resources.resident === 0);
+    assert.equal((await consume(capacity.policy())).pending_convergence, false);
+    await consume(runtime.requestClose());
+    assert.equal((await consume(capacity.policy())).capacity.closing, true);
+    // Read access survives closure while revisions cannot reopen the parent.
+    // 读取权限跨关闭保留，而修订不能重开父级。
+    const closed = capacity.revise(revision, config);
+    await assert.rejects(closed.result(), (error) => error.code === "closed");
+    closed.forget();
+  });
+});
+
 // Actual native capacity handles preserve per-module state and release only after member retirement.
 // 实际原生容量句柄保留各模块状态，仅在成员退役后释放。
 test("typed capacity owns isolated members and explicit release", native, async () => {

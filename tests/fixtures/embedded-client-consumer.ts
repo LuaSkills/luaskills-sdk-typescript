@@ -38,6 +38,15 @@ export async function typedConsumer(driver: EmbeddedCommandDriver, config: embed
   // Pool calls and fixed-session calls must return operation handles, never pretend to return execution values.
   // 池调用及固定会话调用必须返回操作句柄，不假装返回执行结果。
   const pool = await runtime.registerPool(definition, policy, [], "consumer-v1").result();
+  // Revision tokens stay strings throughout the public consumer chain.
+  // 修订令牌在公开消费链全过程保持字符串。
+  const capacity = runtime.capacity("known-capacity");
+  const capacityPolicy: embeddedContract.OutputEmbeddedCapacityPolicySnapshot = await capacity.policy().result();
+  const revision: EmbeddedPending<string> = capacity.revise(capacityPolicy.revision, capacityPolicy.capacity.config);
+  void revision;
+  // @ts-expect-error An opaque native predecessor must not accept an imprecise numeric conversion.
+  // 不透明原生前驱不得接受不精确数值转换。
+  capacity.revise(1, capacityPolicy.capacity.config);
   const context: embeddedContract.InputLuaInvocationContext = { request_context: null, client_budget: null, tool_config: null };
   const submission: EmbeddedPending<EmbeddedOperation> = pool.submit("call", { integer: 18446744073709551615n }, context, 1000n);
   const operation = await submission.result();
