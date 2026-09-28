@@ -43,7 +43,9 @@ export async function withRuntime(action, { driverConfig = null, transportConfig
   const root = mkdtempSync(join(tmpdir(), "luaskills-embedded-ts-"));
   const pluginId = "typescript-embedded-test";
   const systemRoot = join(root, "system_lua_lib");
-  const packageRoot = join(systemRoot, pluginId);
+  // Every actual embedded SDK scenario authorizes an exact generation outside the legacy System root.
+  // 每个真实嵌入式 SDK 场景都授权旧 System 根之外的精确代次。
+  const packageRoot = join(root, "plugin-generations", pluginId);
   mkdirSync(packageRoot, { recursive: true });
   writeFileSync(join(packageRoot, "dependencies.yaml"), "{}\n");
   const transport = new EmbeddedTransport(transportConfig);
