@@ -40,6 +40,52 @@ async function withClient(action) {
   }, { driverConfig });
 }
 
+// Explicit prewarming creates distinct real instances and preserves ordinary operation receipts and close fencing.
+// 明确预热创建不同真实实例，并保留普通操作回执及关闭围栏。
+test("typed prewarm creates additional VMs without calling business exports", native, async () => {
+  await withClient(async ({ runtime, moduleDefinition, poolPolicy }) => {
+    // The local counter can change only when ordinary business is invoked after prewarming.
+    // 仅预热之后调用普通业务时，本地计数器才可变化。
+    const pool = await consume(runtime.registerPool(moduleDefinition(
+      "local count=0; return {call=function() count=count+1; return count end}"), poolPolicy, [], "prewarm-v1"));
+    const instances = new Set();
+    for (let index = 0; index < poolPolicy.max_resident_vms; index += 1) {
+      // Keep the delivered command distinct from its asynchronously completed native operation.
+      // 将已交付命令与其异步完成的原生操作保持分离。
+      const pending = pool.prewarmInstance(invocation, 5000);
+      assert.equal(pending.receipt.lane, "work");
+      const operation = await consume(pending);
+      const result = await operation.wait();
+      assert.equal(result.phase, "succeeded", JSON.stringify(result));
+      assert.equal(result.context.kind, "module");
+      assert.equal(result.context.prewarm, true);
+      assert.equal(result.context.export, null);
+      assert.equal(result.context.pool_id, pool.poolId);
+      assert.equal(typeof result.value.instance_id, "string");
+      assert.equal(instances.has(result.value.instance_id), false);
+      instances.add(result.value.instance_id);
+      await consume(operation.forget());
+    }
+    assert.equal((await consume(pool.status())).resident, instances.size);
+    // Full-pool prewarming fails as a queryable operation; subsequent ordinary reuse must still progress.
+    // 满池预热以可查询操作失败；后续普通复用仍必须推进。
+    const rejected = await consume(pool.prewarmInstance(invocation, 5000));
+    const failure = await rejected.wait();
+    assert.equal(failure.phase, "failed");
+    assert.equal(failure.error.code, "capacity_exceeded");
+    await consume(rejected.forget());
+    for (const count of [1, 2]) {
+      const business = await consume(pool.submit("call", null, invocation, 5000));
+      assert.equal((await business.wait()).value, count);
+      await consume(business.forget());
+    }
+    await consume(pool.requestClose());
+    const closed = pool.prewarmInstance(invocation, 5000);
+    await assert.rejects(closed.result(), (error) => error.code === "closed");
+    closed.forget();
+  });
+});
+
 // Exact native policy revisions remain reachable when work receipts and VM capacity are exhausted.
 // 精确原生策略修订在工作回执及 VM 容量耗尽时仍可达。
 test("typed capacity revisions preserve pinned state and control admission", native, async () => {

@@ -146,6 +146,52 @@ test("cancelled close observation preserves actual callback, late effects and ow
   });
 });
 
+// Initializer callbacks carry the same real lifetime obligations as ordinary exported calls.
+// 初始化器回调与普通导出调用具有相同的真实寿命义务。
+test("scope retains prewarm initialization after cancelled close observation", native, async () => {
+  await withOwnedRuntime(async ({ runtime, transport, adopt, moduleDefinition, poolPolicy }) => {
+    // Gate the actual host handler so scope completion cannot be inferred from cancellation intent.
+    // 门控真实宿主处理器，防止根据取消意图推断作用域完成。
+    const pump = new EmbeddedCallbackPump(transport, runtime.runtimeId, pumpConfig);
+    let release;
+    let calls = 0;
+    const gate = new Promise((resolve) => { release = resolve; });
+    try {
+      await pump.ready();
+      await pump.register([new HostCapability({ name: "typescript.prewarm", version: "1.0.0",
+        description: "Owned prewarm initialization callback", input_schema: true, output_schema: true,
+        execution: "queued", permissions: ["typescript.host"], scope: "invocation", max_concurrent: 1,
+        max_call_ms: 10000, max_input_bytes: 1024, max_output_bytes: 1024, effects: "mutating", idempotency: "none",
+      }, async (_value, context) => {
+        calls += 1;
+        await gate;
+        context.reportEffects("committed");
+        return null;
+      })]);
+      // The scope adopts the exact pump before admitting any initializer work.
+      // 作用域在接纳任何初始化工作前接管精确泵。
+      const scope = adopt(pump);
+      await scope.ready();
+      const pool = await consume(runtime.registerPool(moduleDefinition(
+        "assert(vulcan.host.call('typescript.prewarm','initialization').ok); return {call=function() error('business must not execute') end}"),
+        poolPolicy, ["typescript.host"], "scope-prewarm"));
+      const operation = await consume(pool.prewarmInstance(invocation, 10000));
+      await poll(() => calls, (count) => count === 1);
+      assert.equal((await consume(operation.status())).context.prewarm, true);
+      await assert.rejects(scope.close({ signal: AbortSignal.timeout(30) }), (error) => error.name === "TimeoutError");
+      assert.equal(scope.status.phase, "draining_runtime");
+      assert.equal(EmbeddedRuntimeScope.live.includes(scope), true);
+      assert.equal(pump.status.closed, false);
+      assert.equal((await consume(pool.status())).resident, 1);
+      release();
+      await scope.close();
+      assert.equal(scope.status.phase, "closed");
+      assert.equal(pump.status.closed, true);
+      assert.equal(calls, 1);
+    } finally { release(); await pump.close(); }
+  });
+});
+
 test("already cancelled observer still starts and retains one owned shutdown attempt", native, async () => {
   await withOwnedRuntime(async ({ adopt }) => {
     const scope = adopt();

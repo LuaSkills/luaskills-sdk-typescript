@@ -400,6 +400,18 @@ export class EmbeddedPool {
   submit(exportName: string, argumentsValue: wire.EmbeddedJsonValue, context: wire.InputLuaInvocationContext, timeoutMs: wire.EmbeddedInteger): EmbeddedPending<EmbeddedOperation> {
     return this.#runtime.request({ type: "call_submit", call: { pool_id: this.#poolId, export: exportName, arguments: argumentsValue, context }, timeout_ms: timeoutMs }, "work").map((value) => this.#runtime.operation(value.operation_id));
   }
+  /** Initialize one additional VM in this exact reusable pool without invoking a business export.
+   * 在此精确可复用池初始化一个额外 VM，不调用业务导出。
+   * @param context Trusted host metadata retained by the native operation.
+   * 原生操作保留的可信宿主元数据。
+   * @param timeoutMs Original native execution budget, distinct from observer cancellation.
+   * 原始原生执行预算，独立于观察取消。
+   * @returns Retained admission receipt; the resulting operation reports instance_id after successful initialization.
+   * 保留入场回执；所得操作在初始化成功后报告 instance_id。
+   */
+  prewarmInstance(context: wire.InputLuaInvocationContext, timeoutMs: wire.EmbeddedInteger): EmbeddedPending<EmbeddedOperation> {
+    return this.#runtime.request({ type: "instance_prewarm", request: { pool_id: this.#poolId, context }, timeout_ms: timeoutMs }, "work").map((value) => this.#runtime.operation(value.operation_id));
+  }
   /** Reserve a fixed session with timeoutMs initialization budget; return session and initialization handles.
    * 使用 timeoutMs 初始化预算预留固定会话；返回会话及初始化句柄。 */
   openSession(timeoutMs: wire.EmbeddedInteger): EmbeddedPending<EmbeddedSessionOpen> {

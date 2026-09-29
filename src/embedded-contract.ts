@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "f6504bb5b89b4eecb300b805b676f4f1e7c621cae125f8de3a11aab1f9119cf5" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "fcc79638e44494174ce1b81547b25afb33809fe353cec39001d999a7153fcd56" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -49,7 +49,7 @@ export const EMBEDDED_ROOT_COMMANDS = Object.freeze(["describe","runtime_reserve
  * Generated wire shape for EMBEDDED_RUNTIME_COMMANDS.
  * EMBEDDED_RUNTIME_COMMANDS 的生成线形状。
  */
-export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","storage_worker_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","capacity_register","capacity_status","capacity_policy","capacity_revise","capacity_close","capacity_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_list","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
+export const EMBEDDED_RUNTIME_COMMANDS = Object.freeze(["operation_persistence_failure","operation_retry_checkpoint","storage_status","storage_recover","storage_worker_recover","history_get","history_next","history_reconcile","history_forget","plugin_register","plugin_status","plugin_close","plugin_forget","capacity_register","capacity_status","capacity_policy","capacity_revise","capacity_close","capacity_forget","pool_register","pool_status","pool_close","pool_forget","pool_revoke_permission","call_submit","instance_prewarm","session_open","session_submit","session_status","session_close","session_forget","operation_status","operation_list","operation_wait","operation_cancel","operation_forget","capabilities_register","capabilities_list","capability_status","capability_unregister","capability_forget","host_requests_take","host_request_status","host_request_complete"] as const);
 
 /**
  * Generated wire shape for EMBEDDED_DESCRIPTION_VERSION.
@@ -67,7 +67,7 @@ export const EMBEDDED_DESCRIPTION_MAX_BYTES = 16384 as const;
  * Generated wire shape for EMBEDDED_REQUIRED_CAPABILITIES.
  * EMBEDDED_REQUIRED_CAPABILITIES 的生成线形状。
  */
-export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","capacity_groups_v1","capacity_policy_revisions_v1","shared_pools_v1","dedicated_pools_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","journal_worker_recovery_v1","strict_json_v1"] as const);
+export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","capacity_groups_v1","capacity_policy_revisions_v1","shared_pools_v1","dedicated_pools_v1","explicit_instance_prewarm_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","journal_worker_recovery_v1","strict_json_v1"] as const);
 
 /**
  * Generated wire shape for EmbeddedNativeStatus.
@@ -432,6 +432,23 @@ export type InputEmbeddedPluginConfig = ({
  * 保留会话的数量上限，包含已关闭会话记录。
  */
 "max_sessions": EmbeddedInteger;
+});
+
+/**
+ * Explicitly initialize one additional reusable VM without invoking any business export.
+ * 明确初始化一个额外可复用 VM，不调用任何业务导出。
+ */
+export type InputEmbeddedPrewarm = ({
+/**
+ * Trusted context retained for caller attribution and this instance's eventual finalization.
+ * 为调用方归属及此实例最终关闭保留的可信上下文。
+ */
+"context": InputLuaInvocationContext;
+/**
+ * Exact immutable reusable pool identity; an existing idle VM never satisfies this request.
+ * 精确不可变可复用池身份；已有空闲 VM 绝不抵充此请求。
+ */
+"pool_id": string;
 });
 
 /**
@@ -1633,6 +1650,22 @@ export type InputRuntimeCommand = (({
 "type": "call_submit";
 }) | ({
 /**
+ * Exact pool and trusted initialization/finalization context.
+ * 精确池及可信初始化／关闭上下文。
+ */
+"request": InputEmbeddedPrewarm;
+/**
+ * Original end-to-end execution budget in milliseconds.
+ * 原始端到端执行预算毫秒数。
+ */
+"timeout_ms": EmbeddedInteger;
+/**
+ * Generated wire shape for type.
+ * type 的生成线形状。
+ */
+"type": "instance_prewarm";
+}) | ({
+/**
  * Exact immutable pool identity.
  * 精确不可变池身份。
  */
@@ -2816,8 +2849,8 @@ export type OutputOperationContext = (({
  */
 "capability_revision": string;
 /**
- * Requested declared export; absent only for a fixed-session opening operation.
- * 请求的已声明导出；仅固定会话开启操作省略。
+ * Requested declared export; absent for explicit prewarming or fixed-session opening only.
+ * 请求的已声明导出；仅明确预热或固定会话开启操作省略。
  */
 "export": (string | null);
 /**
@@ -2835,6 +2868,11 @@ export type OutputOperationContext = (({
  * 精确保留池身份，不查询插件最新的池。
  */
 "pool_id": string;
+/**
+ * Explicit additional-instance initialization, never inferred from a missing export.
+ * 明确额外实例初始化，绝不根据缺失导出推断。
+ */
+"prewarm"?: boolean;
 }));
 
 /**
@@ -3979,6 +4017,28 @@ export type OutputRuntimeHostRequestsTakeResponse = ({
  * Borrowed success envelope avoids cloning application output during native response publication.
  * 借用成功信封，避免原生响应发布期间克隆应用输出。
  */
+export type OutputRuntimeInstancePrewarmResponse = ({
+/**
+ * Single protocol version authority.
+ * 唯一协议版本权威。
+ */
+"protocol_version": number;
+/**
+ * Borrowed result whose owner lives through serialization.
+ * 借用结果，其所有者跨序列化存活。
+ */
+"result": OutputOperationReceipt;
+/**
+ * Exact success discriminator.
+ * 精确成功判别。
+ */
+"status": OutputSuccessStatus;
+} & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Borrowed success envelope avoids cloning application output during native response publication.
+ * 借用成功信封，避免原生响应发布期间克隆应用输出。
+ */
 export type OutputRuntimeOperationCancelResponse = ({
 /**
  * Single protocol version authority.
@@ -4640,6 +4700,11 @@ export type EmbeddedRuntimeResponseMap = {
  * host_requests_take 的生成线形状。
  */
 "host_requests_take": OutputRuntimeHostRequestsTakeResponse;
+/**
+ * Generated wire shape for instance_prewarm.
+ * instance_prewarm 的生成线形状。
+ */
+"instance_prewarm": OutputRuntimeInstancePrewarmResponse;
 /**
  * Generated wire shape for operation_cancel.
  * operation_cancel 的生成线形状。
