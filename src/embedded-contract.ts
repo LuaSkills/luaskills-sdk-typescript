@@ -37,7 +37,7 @@ export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "5f64872836c3681e513e5d8b7ce944002bd5a5e369099df0101d486afb4cb805" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "66e504d36a9bffed4b57b9ce1dd9aa6aaca9030347c57581e3058aac7d69cc3c" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -67,7 +67,7 @@ export const EMBEDDED_DESCRIPTION_MAX_BYTES = 16384 as const;
  * Generated wire shape for EMBEDDED_REQUIRED_CAPABILITIES.
  * EMBEDDED_REQUIRED_CAPABILITIES 的生成线形状。
  */
-export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","capacity_groups_v1","capacity_policy_revisions_v1","shared_pools_v1","dedicated_pools_v1","explicit_instance_prewarm_v1","reusable_pool_readiness_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","journal_worker_recovery_v1","strict_json_v1"] as const);
+export const EMBEDDED_REQUIRED_CAPABILITIES = Object.freeze(["bounded_transports_v1","plugin_budgets_v1","capacity_groups_v1","capacity_policy_revisions_v1","shared_pools_v1","dedicated_pools_v1","explicit_instance_prewarm_v1","reusable_pool_readiness_v1","initialization_capability_policy_v1","fixed_sessions_v1","host_request_queue_v1","in_memory_effect_evidence_v1","durable_operation_history_v1","historical_effect_reconciliation_v1","live_storage_recovery_v1","journal_worker_recovery_v1","strict_json_v1"] as const);
 
 /**
  * Generated wire shape for EmbeddedNativeStatus.
@@ -1568,6 +1568,13 @@ export type InputRuntimeCommand = (({
  * 不可变宿主初始化及配置修订。
  */
 "execution_revision": string;
+/**
+ * Exact initialization callback subset; absent or null inherits grants, while an empty set denies all.
+ * 精确初始化回调子集；省略或空值继承授权，空集合则全部拒绝。
+ * Names only narrow existing authority and are frozen before any VM is allocated.
+ * 名称仅收窄既有权威，并在分配任何 VM 前冻结。
+ */
+"initialization_capabilities"?: (Array<string> | null);
 /**
  * Explicit host grants for this binding or discovery request.
  * 此绑定或发现请求的显式宿主授权。

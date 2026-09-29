@@ -81,6 +81,16 @@ const value: C.EmbeddedJsonValue = { boundary: 18446744073709551615n, negative: 
 /** Input defaults remain optional.
  * 输入默认字段保持可省略。 */
 const options: Pick<C.InputLuaRuntimeHostOptions, "runtime_root"> = {};
+/** Nullable initialization arrays retain omission, explicit null and a deny-all empty list.
+ * 可空初始化数组保留省略、显式空值和全部拒绝的空列表。 */
+type Initialization = Pick<Extract<C.InputRuntimeCommand, {type: "pool_register"}>, "initialization_capabilities">;
+const inherited: Initialization = {};
+const inheritedNull: Initialization = {initialization_capabilities: null};
+const denied: Initialization = {initialization_capabilities: []};
+const narrowed: Initialization = {initialization_capabilities: ["test.callback"]};
+// @ts-expect-error Callback names must be strings.
+// 回调名称必须为字符串。
+const invalidInitialization: Initialization = {initialization_capabilities: [false]};
 /** Discriminated commands match their real response map.
  * 判别命令匹配实际响应映射。 */
 const reserve: C.InputCommand = { type: "runtime_reserve" };
@@ -106,7 +116,7 @@ const unknown: C.InputCommand = { type: "future_command" };
 // @ts-expect-error Undefined loses wire evidence.
 // undefined 会丢失线证据。
 const absent: C.EmbeddedJsonValue = { missing: undefined };
-void [value, options, reserve, receipt, missing, unknown, absent];
+void [value, options, reserve, receipt, missing, unknown, absent, inherited, inheritedNull, denied, narrowed, invalidInitialization];
 `;
   assert.deepEqual(compileConsumer(source), []);
 });

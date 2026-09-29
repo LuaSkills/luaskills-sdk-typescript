@@ -66,6 +66,8 @@ JavaScript 处理器在拥有泵的 Node 事件循环运行；同步处理器必
 
 `runtime.initialize(engineOptions, runtimeConfig)` 是单次构造尝试；必须查询 `runtime.status()` 区分预留、初始化中、就绪、失败及故障，初始化回执本身不代表成功。`runtime.registerPlugin()` 设置聚合预算；`runtime.registerPool()` 保留不可变定义、显式权限及执行修订。`pool.submit()` 和 `session.submit()` 返回操作身份回执，不是 Lua 完成结果；`pool.openSession()` 同时返回会话及独立可查询的初始化操作。句柄身份不可重定向；已知身份构造器不探测或推断原生存在性。
 
+运行时和容量句柄的 `registerPool(definition, policy, permissions, executionRevision, initializationCapabilities)` 均接受可选末尾名单。省略或 `null` 继承既有业务权威；`[]` 拒绝源码初始化中的全部已注册宿主回调；非空列表精确收窄已授权快照。缺失或未授权名称在注册前返回 `permission_denied`。冷初始化和预热使用同一不可变策略；业务及关闭导出保留普通授权，实时撤权仍然生效。修改名单须注册新执行域。此回调限制不是完整 Lua 沙箱。接口尚未发布，要求匹配的 `initialization_capability_policy_v1` 契约及原生库。
+
 `pool.prewarmInstance(context, timeoutMs)` 在工作通道返回 `EmbeddedPending<EmbeddedOperation>`，为明确可复用池初始化一个**额外** VM。须独立观察操作；成功的 `value.instance_id` 标识真实新实例。预热不调用业务导出，但初始化仍可调用已授权宿主能力并产生副作用。满池时操作以 `capacity_exceeded` 失败；单次／会话池在入场时拒绝。取消、检查点恢复、回执及 `EmbeddedRuntimeScope` 归属继续使用既有流程，关闭期间仍等待真实回调。此原语不接受目标总数，也不保证永久驻留，空闲及压力策略继续生效。开发接口要求匹配的 `explicit_instance_prewarm_v1` 契约及原生库。
 
 `pool.reusableStatus()` 通过预留控制通道返回保留的待确认快照。`ready` 统计已确认可借用实例；`physical` 表示实际分配器占用，不能用来推算就绪。初始化、执行、未确认检查点及退役中的实例不可借用。运行时／池关闭或保留入场故障使就绪数归零。查询应用已声明空闲过期规则，不执行 Lua、不创建实例，快照也不预留未来容量。非复用池返回 `invalid_argument`，未知身份返回 `not_found`。观察后须显式遗忘待确认回执。此开发接口尚未发布，要求匹配的 `reusable_pool_readiness_v1` 契约及原生库。

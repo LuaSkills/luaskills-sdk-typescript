@@ -38,6 +38,9 @@ export async function typedConsumer(driver: EmbeddedCommandDriver, config: embed
   // Pool calls and fixed-session calls must return operation handles, never pretend to return execution values.
   // 池调用及固定会话调用必须返回操作句柄，不假装返回执行结果。
   const pool = await runtime.registerPool(definition, policy, [], "consumer-v1").result();
+  // Empty initialization names remain a supported typed deny-all policy.
+  // 空初始化名称保持为受类型支持的全部拒绝策略。
+  await runtime.registerPool(definition, policy, [], "consumer-denied", []).result();
   // Readiness is a typed scheduler observation, separate from physical allocator usage.
   // 就绪是类型化调度器观测，与物理分配器使用量分离。
   const readiness: embeddedContract.OutputEmbeddedReusablePoolSnapshot = await pool.reusableStatus().result();

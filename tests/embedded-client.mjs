@@ -40,6 +40,60 @@ async function withClient(action) {
   }, { driverConfig });
 }
 
+// Actual callback observations distinguish inherited, denied and narrowed source authority in both placements.
+// 真实回调观测在两种归属中区分继承、拒绝和收窄源码权威。
+test("typed initialization policy narrows callbacks without changing business authority", native, async () => {
+  for (const names of [undefined, null, [], ["typescript.callback"]]) {
+    for (const grouped of [false, true]) {
+      await withClient(async ({ runtime, transport, runtimeId, moduleDefinition, poolPolicy, pluginId, runtimeConfig }) => {
+        // One real pump records effects from this exact native registration and never mocks Lua dispatch.
+        // 单个真实泵记录此精确原生注册产生的副作用，不模拟 Lua 分发。
+        const calls = [];
+        const pump = new EmbeddedCallbackPump(transport, runtimeId, { maxConcurrentHandlers: 1, maxPendingCommands: 1, pollIntervalMs: 2 });
+        try {
+          await pump.ready();
+          const descriptor = { name: "typescript.callback", version: "1.0.0", description: "Initialization policy fixture", input_schema: true, output_schema: true, execution: "queued", permissions: ["typescript.host"], scope: "invocation", max_concurrent: 1, max_call_ms: 10000, max_input_bytes: 1024, max_output_bytes: 1024, effects: "mutating", idempotency: "none" };
+          await pump.register([new HostCapability(descriptor, async (value, context) => {
+            calls.push(value);
+            context.reportEffects("committed");
+            return value;
+          })]);
+          const allowed = names === undefined || names === null || names.length > 0;
+          const definition = moduleDefinition(`local init=vulcan.host.call('typescript.callback','initialization'); assert(init.ok == ${allowed}); return {call=function() return vulcan.host.call('typescript.callback','business').value end}`);
+          let registrar = runtime;
+          if (grouped) {
+            registrar = await consume(runtime.registerCapacity(pluginId, {
+              resources: { kind: poolPolicy.kind, min_resident_vms: 0, max_resident_vms: poolPolicy.max_resident_vms, max_running_calls: poolPolicy.max_running_calls },
+              max_queued_calls: poolPolicy.max_queued_calls, max_queued_bytes: runtimeConfig.max_queued_bytes,
+            }));
+          }
+          const pool = await consume(registrar.registerPool(definition, poolPolicy, ["typescript.host"], "init-v1", names));
+          if (grouped) {
+            const prewarm = await consume(pool.prewarmInstance(invocation, 5000));
+            assert.equal((await prewarm.wait()).phase, "succeeded");
+            await consume(prewarm.forget());
+          }
+          const business = await consume(pool.submit("call", null, invocation, 5000));
+          const done = await business.wait();
+          assert.equal(done.phase, "succeeded", JSON.stringify(done));
+          assert.equal(done.value, "business");
+          assert.deepEqual(calls, allowed ? ["initialization", "business"] : ["business"]);
+          await consume(business.forget());
+          // Frozen authority is checked before registration, never granted by the requested initialization list.
+          // 注册前检查冻结权威，绝不通过请求的初始化列表授予权限。
+          for (const [invalidNames, permissions] of [[["missing.callback"], ["typescript.host"]], [["typescript.callback"], []]]) {
+            const rejected = registrar.registerPool(definition, poolPolicy, permissions, "invalid-init", invalidNames);
+            await assert.rejects(rejected.result(), (error) => error.code === "permission_denied");
+            rejected.forget();
+          }
+        } finally {
+          await pump.close();
+        }
+      });
+    }
+  }
+});
+
 // Explicit prewarming creates distinct real instances and preserves ordinary operation receipts and close fencing.
 // 明确预热创建不同真实实例，并保留普通操作回执及关闭围栏。
 test("typed prewarm creates additional VMs without calling business exports", native, async () => {

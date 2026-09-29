@@ -241,11 +241,13 @@ export class EmbeddedRuntime {
    * 显式宿主授权权限集合。
    * @param executionRevision Immutable host configuration revision.
    * 不可变宿主配置修订。
+   * @param initializationCapabilities Exact initialization subset; omitted/null inherits, [] denies all.
+   * 精确初始化子集；省略或空值继承，空数组全部拒绝。
    * @returns Actual registered pool handle receipt.
    * 实际已注册池的句柄回执。
    */
-  registerPool(definition: wire.InputModuleDefinition, policy: wire.InputPluginPoolConfig, permissions: string[], executionRevision: string): EmbeddedPending<EmbeddedPool> {
-    return this.request({ type: "pool_register", definition, policy, permissions, execution_revision: executionRevision }, "work").map((value) => this.pool(value.pool_id));
+  registerPool(definition: wire.InputModuleDefinition, policy: wire.InputPluginPoolConfig, permissions: string[], executionRevision: string, initializationCapabilities: string[] | null = null): EmbeddedPending<EmbeddedPool> {
+    return this.request({ type: "pool_register", definition, policy, permissions, execution_revision: executionRevision, initialization_capabilities: initializationCapabilities }, "work").map((value) => this.pool(value.pool_id));
   }
   /** Bind known pluginId and return a handle without probing its native existence.
    * 绑定已知 pluginId 并返回句柄，不探测其原生存在性。 */
@@ -351,9 +353,11 @@ export class EmbeddedCapacity {
   /** Register definition, policy, permissions and executionRevision in this capacity; return its acknowledged member.
    * 在此容量中注册 definition、policy、permissions 和 executionRevision；返回已确认成员。
    * Native checks reject foreign plugins and conflicting budgets without independent-placement fallback.
-   * 原生检查拒绝外来插件及冲突预算，不回退独立归属。 */
-  registerPool(definition: wire.InputModuleDefinition, policy: wire.InputPluginPoolConfig, permissions: string[], executionRevision: string): EmbeddedPending<EmbeddedPool> {
-    return this.#runtime.request({ type: "pool_register", capacity_id: this.#capacityId, definition, policy, permissions, execution_revision: executionRevision }, "work")
+   * 原生检查拒绝外来插件及冲突预算，不回退独立归属。
+   * initializationCapabilities narrows source callbacks; omitted/null inherits, [] denies all without adding grants.
+   * initializationCapabilities 收窄源码回调；省略或空值继承，空数组全部拒绝且不增加授权。 */
+  registerPool(definition: wire.InputModuleDefinition, policy: wire.InputPluginPoolConfig, permissions: string[], executionRevision: string, initializationCapabilities: string[] | null = null): EmbeddedPending<EmbeddedPool> {
+    return this.#runtime.request({ type: "pool_register", capacity_id: this.#capacityId, definition, policy, permissions, execution_revision: executionRevision, initialization_capabilities: initializationCapabilities }, "work")
       .map((value) => this.#runtime.pool(value.pool_id));
   }
 }

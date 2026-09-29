@@ -145,11 +145,12 @@ function expression(schema, names) {
   if (Object.keys(schema).every((key) => annotations.has(key))) return "EmbeddedJsonValue";
   if (Array.isArray(schema.type)) {
     if (!schema.type.length || new Set(schema.type).size !== schema.type.length) throw new Error("Invalid type alternatives");
-    // Numeric constraints apply only to numeric instances in a nullable type union.
-    // 在可空类型联合中，数值约束仅适用于数值实例。
+    // Type-specific constraints apply only to their matching instance type in a nullable union.
+    // 在可空联合中，类型专用约束仅适用于匹配的实例类型。
     return `(${schema.type.map((type) => {
       const branch = { ...schema, type };
       if (type === "null" && schema.type.includes("integer")) { delete branch.minimum; delete branch.format; }
+      if (type === "null" && schema.type.includes("array")) { delete branch.items; delete branch.uniqueItems; }
       return expression(branch, names);
     }).join(" | ")})`;
   }
