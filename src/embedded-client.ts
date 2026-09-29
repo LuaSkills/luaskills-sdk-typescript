@@ -374,6 +374,16 @@ export class EmbeddedPool {
   /** Return real native VM accounting, including creation and retirement.
    * 返回真实原生 VM 计费，包含创建及退役。 */
   status(): EmbeddedPending<wire.OutputPoolUsage> { return this.#runtime.request({ type: "pool_status", pool_id: this.#poolId }, "control"); }
+
+  /**
+   * Query this exact reusable pool on the control lane and return confirmed idle readiness separately from physical usage.
+   * 在控制通道查询此精确可复用池，将已确认空闲就绪与物理用量分开返回。
+   * Reject unknown or non-reusable pools; this observation does not reserve or promise future idle instances.
+   * 拒绝未知或非复用池；此观测不预留或承诺未来空闲实例。
+   */
+  reusableStatus(): EmbeddedPending<wire.OutputEmbeddedReusablePoolSnapshot> {
+    return this.#runtime.request({ type: "pool_reusable_status", pool_id: this.#poolId }, "control");
+  }
   /** Request permanent pool closure; return acknowledgement without inferring actual VM destruction.
    * 请求永久关闭池；返回确认，不推断实际 VM 销毁。 */
   requestClose(): EmbeddedPending<null> { return this.#runtime.request({ type: "pool_close", pool_id: this.#poolId }, "control"); }

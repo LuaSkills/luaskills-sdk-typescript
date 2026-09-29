@@ -48,6 +48,15 @@ test("typed prewarm creates additional VMs without calling business exports", na
     // 仅预热之后调用普通业务时，本地计数器才可变化。
     const pool = await consume(runtime.registerPool(moduleDefinition(
       "local count=0; return {call=function() count=count+1; return count end}"), poolPolicy, [], "prewarm-v1"));
+    // A cold scheduler snapshot must preserve the exact identity without creating a VM.
+    // 冷调度快照必须保留精确身份，且不创建 VM。
+    const cold = pool.reusableStatus();
+    assert.equal(cold.receipt.lane, "control");
+    const initial = await consume(cold);
+    assert.equal(initial.pool_id, pool.poolId);
+    assert.equal(initial.ready, 0);
+    assert.equal(initial.physical.resident, 0);
+    assert.equal(initial.max_resident_vms, poolPolicy.max_resident_vms);
     const instances = new Set();
     for (let index = 0; index < poolPolicy.max_resident_vms; index += 1) {
       // Keep the delivered command distinct from its asynchronously completed native operation.
@@ -65,6 +74,7 @@ test("typed prewarm creates additional VMs without calling business exports", na
       assert.equal(instances.has(result.value.instance_id), false);
       instances.add(result.value.instance_id);
       await consume(operation.forget());
+      assert.equal((await consume(pool.reusableStatus())).ready, instances.size);
     }
     assert.equal((await consume(pool.status())).resident, instances.size);
     // Full-pool prewarming fails as a queryable operation; subsequent ordinary reuse must still progress.
@@ -80,9 +90,33 @@ test("typed prewarm creates additional VMs without calling business exports", na
       await consume(business.forget());
     }
     await consume(pool.requestClose());
+    // Closed admission remains observable on the original pool and never reports borrowable state.
+    // 关闭入场后原池仍可观测，且绝不报告可借用状态。
+    const retired = await consume(pool.reusableStatus());
+    assert.equal(retired.pool_id, pool.poolId);
+    assert.equal(retired.closing, true);
+    assert.equal(retired.ready, 0);
     const closed = pool.prewarmInstance(invocation, 5000);
     await assert.rejects(closed.result(), (error) => error.code === "closed");
     closed.forget();
+  });
+});
+
+// Invalid pool kinds and missing identities must remain explicit errors without source execution.
+// 无效池类型及缺失身份必须保持显式错误，且不执行源码。
+test("typed reusable readiness rejects nonreusable and unknown pools", native, async () => {
+  await withClient(async ({ runtime, moduleDefinition, poolPolicy }) => {
+    // Registration is inert even when evaluating the source would fail.
+    // 即使求值源码会失败，登记也保持惰性。
+    const once = await consume(runtime.registerPool(moduleDefinition("error('query must not execute source')"),
+      { ...poolPolicy, reuse: "single_call" }, [], "readiness-once"));
+    for (const [pool, code] of [[once, "invalid_argument"], [runtime.pool("unknown-readiness-pool"), "not_found"]]) {
+      const pending = pool.reusableStatus();
+      assert.equal(pending.receipt.lane, "control");
+      await assert.rejects(pending.result(), (error) => error.code === code);
+      pending.forget();
+    }
+    assert.equal((await consume(once.status())).resident, 0);
   });
 });
 

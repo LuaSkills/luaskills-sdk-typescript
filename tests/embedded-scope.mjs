@@ -178,11 +178,22 @@ test("scope retains prewarm initialization after cancelled close observation", n
       const operation = await consume(pool.prewarmInstance(invocation, 10000));
       await poll(() => calls, (count) => count === 1);
       assert.equal((await consume(operation.status())).context.prewarm, true);
+      // Actual initializer ownership cannot be mistaken for confirmed idle readiness.
+      // 真实初始化器归属不能被误认为已确认空闲就绪。
+      const initializing = await consume(pool.reusableStatus());
+      assert.equal(initializing.pool_id, pool.poolId);
+      assert.equal(initializing.ready, 0);
+      assert.equal(initializing.unavailable, 1);
+      assert.equal(initializing.physical.resident, 1);
       await assert.rejects(scope.close({ signal: AbortSignal.timeout(30) }), (error) => error.name === "TimeoutError");
       assert.equal(scope.status.phase, "draining_runtime");
       assert.equal(EmbeddedRuntimeScope.live.includes(scope), true);
       assert.equal(pump.status.closed, false);
       assert.equal((await consume(pool.status())).resident, 1);
+      const draining = await consume(pool.reusableStatus());
+      assert.equal(draining.closing, true);
+      assert.equal(draining.ready, 0);
+      assert.equal(draining.physical.resident, 1);
       release();
       await scope.close();
       assert.equal(scope.status.phase, "closed");

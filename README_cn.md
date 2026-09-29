@@ -68,6 +68,8 @@ JavaScript 处理器在拥有泵的 Node 事件循环运行；同步处理器必
 
 `pool.prewarmInstance(context, timeoutMs)` 在工作通道返回 `EmbeddedPending<EmbeddedOperation>`，为明确可复用池初始化一个**额外** VM。须独立观察操作；成功的 `value.instance_id` 标识真实新实例。预热不调用业务导出，但初始化仍可调用已授权宿主能力并产生副作用。满池时操作以 `capacity_exceeded` 失败；单次／会话池在入场时拒绝。取消、检查点恢复、回执及 `EmbeddedRuntimeScope` 归属继续使用既有流程，关闭期间仍等待真实回调。此原语不接受目标总数，也不保证永久驻留，空闲及压力策略继续生效。开发接口要求匹配的 `explicit_instance_prewarm_v1` 契约及原生库。
 
+`pool.reusableStatus()` 通过预留控制通道返回保留的待确认快照。`ready` 统计已确认可借用实例；`physical` 表示实际分配器占用，不能用来推算就绪。初始化、执行、未确认检查点及退役中的实例不可借用。运行时／池关闭或保留入场故障使就绪数归零。查询应用已声明空闲过期规则，不执行 Lua、不创建实例，快照也不预留未来容量。非复用池返回 `invalid_argument`，未知身份返回 `not_found`。观察后须显式遗忘待确认回执。此开发接口尚未发布，要求匹配的 `reusable_pool_readiness_v1` 契约及原生库。
+
 `runtime.registerCapacity(pluginId, config)` 返回待确认的 `EmbeddedCapacity`；`runtime.capacity(capacityId)` 绑定精确已知身份。显式提供 `resources`、`max_queued_calls` 和 `max_queued_bytes`。`capacity.registerPool(...)` 要求相同插件归属、池类别、成员最小值为零且上限不超过容量。成员共享聚合预留及入场额度，Lua 状态、模块代次及能力快照各自独立；既有 `runtime.registerPool(...)` 保持独立归属。`status()`、`requestClose()` 和 `forget()` 使用预留控制通道。关闭会排空成员，必须逐个遗忘已关闭且排空的成员后才能遗忘容量；空容量仍保留最小预留，不会自动预热 VM。此开发功能要求匹配的 `capacity_groups_v1` 契约及原生库。
 
 `policy()` 原子返回当前修订字符串、完整容量状态及 `pending_convergence`；`revise(expectedRevision, config)` 使用该精确前驱和完整配置进行比较交换，返回新的字符串令牌。两项均走保留控制通道并返回可查询回执；令牌不得转成数值，SDK 不自动重试冲突。旧前驱或执行上限低于已分发操作数量返回 `busy`，不改变策略。常驻／队列缩容可保留超额实际占用并报告待收敛；固定会话保留原 VM 状态，常驻缩容会沿原清理路径退役可复用缓存。关闭后仍可查询但禁止修订；回执需显式遗忘。此开发接口要求匹配的 `capacity_policy_revisions_v1` 契约与原生库，尚未正式发布。
