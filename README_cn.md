@@ -6,7 +6,7 @@ LuaSkills 主仓库：[LuaSkills/luaskills](https://github.com/LuaSkills/luaskil
 
 TypeScript / Node.js SDK，用于通过公共 JSON FFI 接入 LuaSkills 运行时。
 
-`0.5.7` 是当前发布版本。它沿用严格的技能包级配置契约，并将运行时资产默认值设为 LuaSkills core `v0.5.7`、vldb-controller `v0.2.3` 与 vldb-sqlite `v0.1.6`。
+此源码面向 `0.6.0` 发布线；发布及资产验收遵循既有发布流程。它沿用严格的技能包级配置契约，并将运行时资产默认值设为 LuaSkills core `v0.6.0`、vldb-controller `v0.2.3` 与 vldb-sqlite `v0.1.6`。
 
 SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正式 skill root、带权限语义的管理调用、skill config、provider callback、宿主工具 callback 与 runtime 资产安装。宿主在常规集成中不需要手写底层 FFI buffer 或 JSON 包络。
 
@@ -84,9 +84,23 @@ JavaScript 处理器在拥有泵的 Node 事件循环运行；同步处理器必
 
 `npm pack` 在构建前检查生成文件。针对该精确本地产物执行 `node scripts/verify-embedded-distribution.mjs <archive.tgz>`，可比较嵌入式成员字节，在新进程导入包内编译契约，并运行独立生成器。此开发验证器需要系统 `tar` 命令；普通离线生成只需 Node.js。契约 CI 覆盖 Linux、Windows、macOS 上的 Node 24／26，不代表原生嵌入式运行时验收。
 
+候选原生库另有**必需原生成功**的本地入口。在 SDK 检出中先执行 `npm ci`、`npm pack`，再运行：
+
+```text
+npm run test:embedded-candidate -- <绝对archive.tgz路径> <绝对候选库路径> <冻结库SHA-256> <绝对core-description.json路径>
+```
+
+四项输入必须明确指定。缺库、错误二进制摘要、无效或不匹配的 `OutputCoreDescription` 均失败，不读取 `latest`、不跳过。description 文件必须由候选构建所有者提供，包含真实 `luaskills_ffi_embedded_describe_v1` JSON；验收调用现有兼容校验检查核心／description／协议版本、契约摘要、构建输入摘要及 ABI，并与实际加载库全字段比对。二进制 SHA-256 单独检查。
+
+门禁先复用产物验证器，再在临时目录使用本地 tgz 独立安装；Koffi 按当前 `package-lock.json` 的版本、来源及完整性固定。安装只用 npm 缓存、禁用安装脚本，不下载 SDK 或原生库；缓存缺失明确失败。随后从消费端解析公共包入口，检查包内契约并运行 `examples/embedded-candidate.mjs`。示例用真实 client、driver、callback pump 与 scope，验证初始化回调、显式 VM 预热、复用就绪、业务回调、原生槽移除和全部线程／传输释放。应用整数使用 Lua 可表示范围；完整 u64 无损验证由离线 codec 向量承担。
+
+示例也可独立运行：`npm run example:embedded-candidate -- <绝对候选库路径> <绝对core-description.json路径>`。`npm run check:embedded-example` 检查示例对实际生成类型的调用；`npm run test:embedded-candidate-inputs` 检查缺失／无效输入必失败。CI 执行这些离线检查和实际 npm 打包检查；候选门禁仅证明所选平台及所选二进制，不等同正式发布或其他平台验收。
+
+`npm run test:embedded-example-native -- <绝对候选库路径> <绝对core-description.json路径>` 验证真实预留结果释放及未使用作用域线程启动失败。原 typed Pending 在作用域关闭证明槽移除前，始终可通过存活驱动器发现。测试验证同身份显式恢复、仅预留一次、真实响应及运行时移除、驱动器／传输完整释放、原始错误对象，以及两个独立失败时保留两个诊断。
+
 ## 安装
 
-0.5.7 SDK 要求 Node.js 24 LTS 或更高版本。
+0.6.0 SDK 要求 Node.js 24 LTS 或更高版本。
 
 ```bash
 npm install @luaskills/sdk
@@ -113,7 +127,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_as
 RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all vldb-controller
 ```
 
-目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.5.7`，并允许显式覆盖发布版本。
+目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.6.0`，并允许显式覆盖发布版本。
 
 `install-runtime` 会下载 GitHub Release 资产、校验 `.sha256` 旁路文件、解压原生文件与 Lua runtime 包，并写入：
 
@@ -181,7 +195,7 @@ const pythonInstall = LuaSkillsClient.resolveManagedRuntimeInstall({
 ## 版本对齐
 
 - 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
-- 当前 SDK 默认指向 LuaSkills core 标签 `v0.5.7`。
+- 当前 SDK 默认指向 LuaSkills core 标签 `v0.6.0`。
 - runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
 - SDK 默认 host options 传入 `runtime_root`、两个空的受管根覆盖槽与完整稳定的 `managed_runtime_config`；宿主未显式覆盖时，LuaSkills 会推导固定数据布局。
 - 宿主工具直接放在 `runtime_root/bin`，不再放到 `runtime_root/bin/tools`。
@@ -669,6 +683,8 @@ npm pack --dry-run
 推荐统一发布顺序：`luaskills-packages` -> `luaskills` 核心仓库 -> TypeScript SDK -> Python SDK -> Go SDK -> 各 SDK 的 examples release。
 
 npm 发布成功后，手动运行 GitHub Actions 里的 **Examples Release** 工作流。它会读取 `VERSION`，从 npm 安装 `@luaskills/sdk@{VERSION}`，安装 LuaSkills runtime 资产，运行示例冒烟测试，然后创建或更新 `examples-v{VERSION}` GitHub Release，并上传：
+
+独立 ZIP 是由 `scripts/standalone-examples-manifest.json` 选择的固定源码包。同一清单通过 `scripts/package-standalone-examples.py` 驱动暂存、全部已发布示例冒烟及真实 ZIP 验证。开发 embedded 示例保留在 npm 候选包内。ZIP 不包含已安装 SDK 或平台运行时资产；消费端执行 `npm install` 和 `npm run install-runtime`，首次安装需要网络。`npm run test:standalone-examples` 验证实际归档成员、精确发布依赖／脚本及每个本地 Markdown 链接目标。
 
 - `luaskills-sdk-typescript-examples-{VERSION}.zip`
 - `luaskills-sdk-typescript-examples-{VERSION}.zip.sha256`

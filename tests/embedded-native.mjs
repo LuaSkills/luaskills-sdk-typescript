@@ -7,6 +7,33 @@ import { EmbeddedTransport, EmbeddedFloat, EmbeddedNativeStatus, EmbeddedRuntime
 const native = { skip: !process.env.LUASKILLS_LIB };
 import { budgets, poll, withRuntime } from "./embedded-fixture.mjs";
 
+// Reject application integers before VM initialization or operation admission; keep explicitly tagged floats.
+// 在 VM 初始化及操作入场前拒绝应用整数；保留显式标记的浮点数。
+test("Lua application integer policy rejects recursively before admission and preserves finite floats", native, async () => {
+  await withRuntime(async ({ command, pool, submit, terminal }) => {
+    // Initialization deliberately fails if invalid arguments ever create a VM.
+    // 若无效参数创建 VM，初始化会故意失败。
+    const rejectingPool = pool("error('invalid arguments reached initialization')");
+    // Original integer tokens include both endpoints beyond the exact Lua range and nested u64 maximum.
+    // 原始整数 token 包括超出 Lua 精确范围的正负端点及嵌套 u64 最大值。
+    const invalid = [9007199254740992n, -9007199254740992n, { nested: [18446744073709551615n] }];
+    for (const value of invalid) assert.throws(() => submit(rejectingPool, value), (error) => error instanceof EmbeddedRuntimeError && error.code === "invalid_argument");
+    assert.deepEqual(command({ type: "operation_list", pool_id: rejectingPool, after_operation_id: null, limit: 16 }).operation_ids, []);
+    // A second pool proves both safe endpoints and the same numeric magnitude declared as Float.
+    // 第二个池证明两个安全端点及声明为 Float 的相同数值量级。
+    const echoPool = pool("return {call=function(a) return a end}");
+    for (const value of [9007199254740991, -9007199254740991, new EmbeddedFloat(9007199254740992), new EmbeddedFloat(1e100)]) {
+      // Each exact operation is forgotten after observing its actual terminal result.
+      // 观察真实终态结果后遗忘每个精确操作。
+      const id = submit(echoPool, value);
+      const done = await terminal(id);
+      assert.equal(done.phase, "succeeded");
+      assert.deepEqual(done.value, value);
+      command({ type: "operation_forget", operation_id: id });
+    }
+  });
+});
+
 // Discovery follows publication rather than opaque ID allocation; closing retains the original reusable VM.
 // 发现遵循发布而非不透明身份分配顺序；关闭保留原可复用 VM。
 test("reusable finalization is discoverable after newer business identities", native, async () => {

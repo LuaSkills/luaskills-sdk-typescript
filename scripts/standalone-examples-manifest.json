@@ -1,0 +1,17 @@
+{
+  "examples": [
+    { "name": "basic", "en": "Read the published SDK JSON FFI version.", "zh": "读取已发布 SDK 的 JSON FFI 版本。" },
+    { "name": "query", "en": "Query the bundled USER fixture and its delegated help surfaces.", "zh": "查询内置 USER 夹具及其委托帮助入口。" },
+    { "name": "call", "en": "Call the fixture skill and inline Lua with invocation context.", "zh": "带调用上下文执行夹具技能及内联 Lua。" },
+    { "name": "lifecycle", "en": "Disable and enable the fixture through the Skills plane.", "zh": "通过 Skills 平面禁用及启用夹具。" },
+    { "name": "runtime-lease", "en": "Reuse one persistent runtime lease and interactive child process.", "zh": "复用一个持久运行时租约及交互式子进程。" },
+    { "name": "provider-callback", "en": "Register a JSON SQLite provider callback before engine creation.", "zh": "在创建引擎前注册 JSON SQLite provider 回调。" }
+  ],
+  "support_files": [
+    "LICENSE",
+    "examples/load-sdk.mjs",
+    "examples/fixture-runtime/user_skills/demo-standard-ffi-skill/skill.yaml",
+    "examples/fixture-runtime/user_skills/demo-standard-ffi-skill/runtime/ping.lua",
+    "examples/fixture-runtime/system_lua_lib/runtime-lease-example/dependencies.json"
+  ]
+}

@@ -23,6 +23,9 @@ export function verifyDistribution(archive) {
   // Only these explicitly declared files may be materialized under the isolated directory.
   // 仅可将这些显式声明文件落盘到隔离目录内。
   const expected = ["package.json", "contracts/embedded/v1/contract.json", "contracts/embedded/v1/contract.sha256", "contracts/embedded/v1/README.md", "scripts/generate-embedded-contract.mjs", "scripts/verify-embedded-distribution.mjs", "src/embedded-contract.ts", "dist/embedded-contract.js", "dist/embedded-contract.d.ts", "dist/embedded-contract.js.map", "src/index.ts", "dist/index.js", "dist/index.d.ts"];
+  // The executable example belongs to the artifact contract, not to a checkout-only fixture.
+  // 可执行示例属于产物契约，不是仅存在于检出中的夹具。
+  expected.push("examples/embedded-candidate.mjs");
   // Public value types stay independent of Node globals; codec and transport artifacts are checked separately.
   // 公开值类型保持独立于 Node 全局；编码器和传输产物分别校验。
   for (const name of ["embedded-value", "embedded-json", "embedded-compatibility", "embedded-transport", "embedded-driver", "embedded-worker", "embedded-worker-protocol", "embedded-worker-runtime", "embedded-callbacks", "embedded-pump", "embedded-observation", "embedded-client", "embedded-scope", "client", "types"]) expected.push(`src/${name}.ts`, `dist/${name}.js`, `dist/${name}.d.ts`, `dist/${name}.js.map`);

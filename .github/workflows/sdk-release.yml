@@ -1,0 +1,373 @@
+name: SDK Release
+run-name: SDK ${{ inputs.sdk_source_sha }} mode=${{ inputs.mode }}
+
+# Dispatch from the default branch containing this workflow and the SDK source being released.
+# 从同时包含本工作流和待发布 SDK 源码的默认分支手动调度。
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_source_sha:
+        description: Exact SDK commit; must equal the dispatch and workflow SHA
+        required: true
+        type: string
+      core_tag:
+        description: Explicit independently released core tag
+        required: true
+        type: string
+      core_commit:
+        description: Exact core commit containing the shared prerequisite gate
+        required: true
+        type: string
+      mode:
+        description: Tested evidence only, protected publication, or explicit original-candidate recovery
+        required: true
+        default: artifact-only
+        type: choice
+        options: [artifact-only, publish, recover]
+      candidate_run_id:
+        description: Exact original run ID; required for recovery
+        type: string
+      candidate_run_attempt:
+        description: Exact original attempt; required for recovery
+        type: string
+      candidate_artifact_id:
+        description: Actual uploaded original artifact ID; required for recovery
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare
+    if: ${{ inputs.mode != 'recover' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      core_host_platform: ${{ steps.matrix.outputs.core_host_platform }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify default-branch workflow identity
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          SOURCE_SHA: ${{ inputs.sdk_source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$WORKFLOW_SHA" = "$GITHUB_SHA"
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/sdk-release.yml@refs/heads/$DEFAULT_BRANCH"
+      - uses: actions/checkout@v6
+        with:
+          repository: LuaSkills/luaskills
+          ref: ${{ inputs.core_commit }}
+          path: core-release
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Check toolchain and freeze identities before packaging
+        env:
+          CORE_TAG: ${{ inputs.core_tag }}
+          CORE_COMMIT: ${{ inputs.core_commit }}
+          SDK_SHA: ${{ inputs.sdk_source_sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          python scripts/release/sdk_release.py tools
+          python scripts/release/sdk_release.py freeze --core-root core-release --core-tag "$CORE_TAG" --core-commit "$CORE_COMMIT" --sdk-source-sha "$SDK_SHA" --workflow-source-sha "$WORKFLOW_SHA" --output target/sdk-release/freeze.json
+      - name: Derive native platform matrix and the prerequisite host from the core authority
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(python scripts/release/sdk_release.py matrix --core-root core-release --output target/matrix.json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          host_platform="$(node -e 'const hosts=require("./target/matrix.json").include.filter(p=>p.runner==="ubuntu-24.04");if(hosts.length!==1)throw Error("One prerequisite host platform required");process.stdout.write(hosts[0].platform)')"
+          echo "core_host_platform=$host_platform" >> "$GITHUB_OUTPUT"
+      # Only verified public release records select the Rust installation; this phase cannot authorize publication.
+      # 仅已核验公共发布记录可选择 Rust 安装版本；本阶段不能授权发布。
+      - name: Verify public core assets before selecting its actual release toolchain
+        env:
+          CORE_TAG: ${{ inputs.core_tag }}
+          CORE_COMMIT: ${{ inputs.core_commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: python core-release/scripts/release/sdk_prerequisites.py --core-tag "$CORE_TAG" --core-commit "$CORE_COMMIT" --phase github-only --output target/core-bootstrap
+      - name: Install the exact verified core release toolchain for the registry prerequisite
+        shell: bash
+        env:
+          CORE_PLATFORM: ${{ steps.matrix.outputs.core_host_platform }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python core-release/scripts/release/sdk_prerequisites.py toolchain-inputs --input target/core-bootstrap/prerequisites.json --platform "$CORE_PLATFORM" --output target/core-toolchain.json
+          toolchain="$(node -e 'process.stdout.write(require("./target/core-toolchain.json").toolchain)')"
+          rustup toolchain install "$toolchain" --profile minimal --no-self-update
+      - name: Shared complete core prerequisite including the real registry consumer
+        env:
+          CORE_TAG: ${{ inputs.core_tag }}
+          CORE_COMMIT: ${{ inputs.core_commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: python core-release/scripts/release/sdk_prerequisites.py --core-tag "$CORE_TAG" --core-commit "$CORE_COMMIT" --output target/core-prerequisites
+      - name: Install locked build dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build and pack exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --pack-destination target/sdk-release --json --foreground-scripts=false > target/pack-result.json
+          archive="$(node -e 'const p=require("./target/pack-result.json");if(p.length!==1)throw Error("One archive required");process.stdout.write(p[0].filename)')"
+          python scripts/release/sdk_release.py artifact --freeze target/sdk-release/freeze.json --archive "target/sdk-release/$archive" --output target/sdk-release/artifact.json
+          python tests/sdk-release-gate.py --core-root core-release --archive "target/sdk-release/$archive"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-tested-archive
+          path: target/sdk-release/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-prerequisites
+          path: target/core-prerequisites/
+          if-no-files-found: error
+
+  native:
+    name: native-${{ matrix.platform }}
+    if: ${{ inputs.mode != 'recover' }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/checkout@v6
+        with:
+          repository: LuaSkills/luaskills
+          ref: ${{ inputs.core_commit }}
+          path: core-release
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-tested-archive
+          path: target/sdk-release
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-prerequisites
+          path: target/core-prerequisites
+      - name: Warm only the exact locked dependencies; never rebuild the SDK
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Installed tgz native gate; a missing native input is a failure
+        env:
+          CORE_PLATFORM: ${{ matrix.platform }}
+        run: python scripts/release/sdk_release.py native --core-root core-release --artifact target/sdk-release/artifact.json --prerequisites target/core-prerequisites/prerequisites.json --platform "$CORE_PLATFORM" --output target/native-evidence/result.json
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: target/native-evidence/
+          if-no-files-found: error
+
+  aggregate:
+    name: aggregate
+    if: ${{ inputs.mode != 'recover' }}
+    needs: [prepare, native]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/checkout@v6
+        with:
+          repository: LuaSkills/luaskills
+          ref: ${{ inputs.core_commit }}
+          path: core-release
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-tested-archive
+          path: target/sdk-release
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-prerequisites
+          path: target/core-prerequisites
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: target/native-evidence
+      - name: Require every platform to prove the same SDK archive and exact core
+        run: python scripts/release/sdk_release.py aggregate --core-root core-release --artifact target/sdk-release/artifact.json --prerequisites target/core-prerequisites/prerequisites.json --evidence-dir target/native-evidence --output target/sdk-release/aggregate.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-five-platform-proof
+          path: target/sdk-release/
+          if-no-files-found: error
+
+  candidate-evidence:
+    name: candidate-evidence
+    if: ${{ inputs.mode != 'recover' }}
+    needs: [prepare, native, aggregate]
+    runs-on: ubuntu-24.04
+    # Signing tested evidence grants no registry or Release write authority.
+    # 签名已测证据不授予注册表或 Release 写入权限。
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/checkout@v6
+        with:
+          repository: LuaSkills/luaskills
+          ref: ${{ inputs.core_commit }}
+          path: core-release
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-five-platform-proof
+          path: target/sdk-release
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-prerequisites
+          path: target/core-prerequisites
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: target/native-evidence
+      - name: Freeze all original tested subjects before any publication
+        id: binding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          name="$(python scripts/release/sdk_release.py candidate-bundle --core-root core-release --artifact target/sdk-release/artifact.json --aggregate target/sdk-release/aggregate.json --prerequisites target/core-prerequisites/prerequisites.json --evidence-dir target/native-evidence --repository "$GITHUB_REPOSITORY" --mode "$MODE" --output target/original-candidate)"
+          echo "artifact_name=$name" >> "$GITHUB_OUTPUT"
+      - name: Officially sign every original subject and the direct recovery binding
+        id: attest
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: target/original-candidate/*
+      - name: Verify signed original bytes before upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" target/original-candidate/sdk-candidate-attestation.jsonl
+          python scripts/release/sdk_release.py candidate-seal --core-root core-release --input target/original-candidate
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: ${{ steps.binding.outputs.artifact_name }}
+          path: target/original-candidate/*
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: publish
+    if: ${{ always() && inputs.mode != 'artifact-only' && (inputs.mode == 'recover' || needs.candidate-evidence.result == 'success') }}
+    needs: [prepare, native, aggregate, candidate-evidence]
+    runs-on: ubuntu-24.04
+    environment: production
+    # The current protected intent owns mutation; original artifact-only mode remains unchanged.
+    # 当前受保护意图拥有变更权限；原 artifact-only 模式保持不变。
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      COMPLETION_INTENT: ${{ inputs.mode }}
+      CORE_TAG: ${{ inputs.core_tag }}
+      CORE_COMMIT: ${{ inputs.core_commit }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/checkout@v6
+        with:
+          repository: LuaSkills/luaskills
+          ref: ${{ inputs.core_commit }}
+          path: core-release
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: Authenticate the explicit original signed artifact before any registry mutation
+        env:
+          SOURCE_SHA: ${{ inputs.sdk_source_sha }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run_id }}
+          CANDIDATE_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact_id }}
+          NEW_ARTIFACT: ${{ needs.candidate-evidence.outputs.artifact_id }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          if [ "$COMPLETION_INTENT" = publish ]; then
+            CANDIDATE_RUN="$GITHUB_RUN_ID"
+            CANDIDATE_ATTEMPT="$GITHUB_RUN_ATTEMPT"
+            CANDIDATE_ARTIFACT="$NEW_ARTIFACT"
+          fi
+          python scripts/release/sdk_release.py candidate-fetch --core-root core-release --repository "$GITHUB_REPOSITORY" --sdk-source-sha "$SOURCE_SHA" --candidate-run-id "$CANDIDATE_RUN" --candidate-run-attempt "$CANDIDATE_ATTEMPT" --candidate-artifact-id "$CANDIDATE_ARTIFACT" --output target/authenticated-candidate
+      - name: Derive the prerequisite host from the frozen core authority
+        run: python scripts/release/sdk_release.py matrix --core-root core-release --output target/publish-matrix.json
+      - name: Fresh public core bootstrap before the registry recheck
+        run: python core-release/scripts/release/sdk_prerequisites.py --core-tag "$CORE_TAG" --core-commit "$CORE_COMMIT" --phase github-only --output target/core-publish-bootstrap
+      - name: Install only the verified actual release toolchain
+        run: |
+          set -euo pipefail
+          platform="$(node -e 'const p=require("./target/publish-matrix.json").include.filter(p=>p.runner==="ubuntu-24.04");if(p.length!==1)throw Error("One host required");process.stdout.write(p[0].platform)')"
+          python core-release/scripts/release/sdk_prerequisites.py toolchain-inputs --input target/core-publish-bootstrap/prerequisites.json --platform "$platform" --output target/core-publish-toolchain.json
+          toolchain="$(node -e 'process.stdout.write(require("./target/core-publish-toolchain.json").toolchain)')"
+          rustup toolchain install "$toolchain" --profile minimal --no-self-update
+      - name: Fresh complete core recheck against the original signed prerequisite
+        run: python core-release/scripts/release/sdk_prerequisites.py recheck --input target/authenticated-candidate/core-prerequisites/prerequisites.json --output target/core-recheck
+      - name: Rebind original native results to fresh complete core proof
+        run: python scripts/release/sdk_release.py aggregate --core-root core-release --artifact target/authenticated-candidate/original/sdk-artifact.json --prerequisites target/core-recheck/prerequisites.json --evidence-dir target/authenticated-candidate/native-evidence --output target/publish-aggregate.json
+      - name: Publish exact tested tgz once or reuse verified official bytes
+        run: python scripts/release/sdk_release.py publish-or-verify --core-root core-release --candidate target/authenticated-candidate --intent "$COMPLETION_INTENT" --artifact target/authenticated-candidate/original/sdk-artifact.json --aggregate target/publish-aggregate.json --prerequisites target/core-recheck/prerequisites.json --evidence-dir target/authenticated-candidate/native-evidence --repository "$GITHUB_REPOSITORY" --output target/npm-publication.json
+      - name: Cold-cache official npm install and actual native acceptance
+        run: python scripts/release/sdk_release.py registry-consumer --core-root core-release --artifact target/authenticated-candidate/original/sdk-artifact.json --prerequisites target/core-recheck/prerequisites.json --platform host --output target/fresh-consumer.json
+      - name: Complete the main Release with only original signed candidate bytes
+        run: python scripts/release/sdk_release.py publish-candidate --core-root core-release --candidate target/authenticated-candidate --intent "$COMPLETION_INTENT" --repository "$GITHUB_REPOSITORY" --consumer target/fresh-consumer.json --prerequisites target/core-recheck/prerequisites.json --output target/main-release.json
+      - name: Freeze a separate completion referencing the original immutable subjects
+        run: python scripts/release/sdk_release.py completion-bundle --core-root core-release --candidate target/authenticated-candidate --intent "$COMPLETION_INTENT" --repository "$GITHUB_REPOSITORY" --consumer target/fresh-consumer.json --aggregate target/publish-aggregate.json --prerequisites target/core-recheck/prerequisites.json --main-release target/main-release.json --output target/completion
+      - name: Officially sign fresh completion subjects
+        id: attest
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: target/completion/*
+      - name: Publish a new separate immutable completion Release
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" target/completion/sdk-completion-attestation.jsonl
+          python scripts/release/sdk_release.py publish-completion --core-root core-release --repository "$GITHUB_REPOSITORY" --input target/completion --intent "$COMPLETION_INTENT"

@@ -12,6 +12,40 @@ import { budgets, withRuntime, poll } from "./embedded-fixture.mjs";
 const native = { skip: !process.env.LUASKILLS_LIB };
 const limits = Object.freeze({ maxConcurrentHandlers: 2, maxPendingCommands: 2, pollIntervalMs: 2 });
 
+// Native completion accepts ownership while projecting an invalid application result as a committed error.
+// 原生完成接纳所有权，同时把无效应用结果投影为已提交错误。
+test("unsafe integer callback completion preserves the exact committed ledger and remains reusable", native, async () => {
+  await withPump(async ({ pump, command, pool, submit, terminal }) => {
+    // Track exact callback identities so completion assertions cannot bind to a changing array index.
+    // 跟踪精确回调身份，避免完成断言依赖变化的数组下标。
+    const requests = [];
+    await pump.register([capability("typescript.callback", (value, context) => {
+      requests.push(context.requestId);
+      context.reportEffects("committed");
+      return value === "unsafe" ? 18446744073709551615n : value;
+    })]);
+    const poolId = pool("return {call=function(a) return vulcan.capabilities.call('typescript.callback',a) end}");
+    const rejected = await terminal(submit(poolId, "unsafe"));
+    assert.equal(rejected.phase, "succeeded");
+    // Overall Lua execution remains unknown; one host commit cannot establish the entire operation's effects.
+    // 整体 Lua 执行保持未知；一次宿主提交不能确定整个操作的副作用。
+    assert.equal(rejected.effects, "unknown");
+    assert.equal(rejected.value.ok, false);
+    assert.equal(rejected.value.error.code, "invalid_argument");
+    assert.equal(rejected.value.effects, "committed");
+    const effect = rejected.host_effects.find((entry) => entry.request_id === requests[0]);
+    assert.ok(effect, "Original callback ledger identity is missing");
+    assert.equal(effect.phase, "completed");
+    assert.equal(effect.effects, "committed");
+    assert.equal((await terminal(submit(poolId, "normal"))).value.value, "normal");
+    await pump.close();
+    assert.equal(requests.length, 2);
+    assert.equal(pump.status.failure, null);
+    assert.deepEqual(pump.status.requestIds, []);
+    assert.deepEqual(pump.status.pendingAcknowledgements, []);
+  });
+});
+
 /**
  * Create one actual queued declaration using the existing fixture's trusted permission.
  * 使用现有夹具的可信权限创建一个实际队列声明。

@@ -1,19 +1,96 @@
 name: Examples Release
+run-name: Examples ${{ inputs.sdk_source_sha }} mode=${{ inputs.mode }}
 
 on:
   workflow_dispatch:
+    inputs:
+      sdk_candidate_run_id:
+        description: Exact original formal SDK run
+        required: true
+        type: string
+      sdk_candidate_run_attempt:
+        description: Exact original formal SDK attempt
+        required: true
+        type: string
+      sdk_completion_run_id:
+        description: Exact successful formal SDK completion run
+        required: true
+        type: string
+      sdk_completion_run_attempt:
+        description: Exact successful formal SDK completion attempt
+        required: true
+        type: string
+      sdk_completion_source_sha:
+        description: Explicit formal SDK completion source
+        required: true
+        type: string
+      mode:
+        description: Freeze tested examples, publish, or recover exact original examples
+        required: true
+        default: artifact-only
+        type: choice
+        options: [artifact-only, publish, recover]
+      candidate_run_id:
+        description: Exact original examples run; required for recovery
+        type: string
+      candidate_run_attempt:
+        description: Exact original examples attempt; required for recovery
+        type: string
+      candidate_artifact_id:
+        description: Actual original examples artifact ID; required for recovery
+        type: string
+      sdk_source_sha:
+        description: Exact published SDK commit; must equal this dispatch SHA
+        required: true
+        type: string
+      core_commit:
+        description: Exact core commit from the formal SDK proof
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  examples-release:
-    name: Build and publish examples release
-    runs-on: ubuntu-latest
+  candidate-evidence:
+    name: examples-candidate-evidence
+    if: ${{ inputs.mode != 'recover' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify workflow and published SDK source identity
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SDK_SHA: ${{ inputs.sdk_source_sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
+          test "$SDK_SHA" = "$GITHUB_SHA"
+          test "$WORKFLOW_SHA" = "$GITHUB_SHA"
+
+      - uses: actions/checkout@v6
+        with:
+          repository: LuaSkills/luaskills
+          ref: ${{ inputs.core_commit }}
+          path: core-release
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -35,6 +112,21 @@ jobs:
           echo "package_name=luaskills-sdk-typescript-examples-$version" >> "$GITHUB_OUTPUT"
           echo "asset_name=luaskills-sdk-typescript-examples-$version.zip" >> "$GITHUB_OUTPUT"
 
+      - name: Authenticate the formal SDK release proof and consume exact npm bytes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_CANDIDATE_RUN: ${{ inputs.sdk_candidate_run_id }}
+          SDK_CANDIDATE_ATTEMPT: ${{ inputs.sdk_candidate_run_attempt }}
+          SDK_COMPLETION_RUN: ${{ inputs.sdk_completion_run_id }}
+          SDK_COMPLETION_ATTEMPT: ${{ inputs.sdk_completion_run_attempt }}
+          SDK_COMPLETION_SHA: ${{ inputs.sdk_completion_source_sha }}
+          SDK_SHA: ${{ inputs.sdk_source_sha }}
+        run: |
+          set -euo pipefail
+          python scripts/release/sdk_release.py tools
+          python scripts/release/sdk_release.py formal-proof --core-root core-release --candidate-run-id "$SDK_CANDIDATE_RUN" --candidate-run-attempt "$SDK_CANDIDATE_ATTEMPT" --completion-run-id "$SDK_COMPLETION_RUN" --completion-run-attempt "$SDK_COMPLETION_ATTEMPT" --completion-source-sha "$SDK_COMPLETION_SHA" --repository "$GITHUB_REPOSITORY" --sdk-source-sha "$SDK_SHA" --sdk-version "${{ steps.version.outputs.version }}" --output target/formal-sdk-proof
+
       - name: Create standalone examples package
         shell: bash
         env:
@@ -43,44 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           package_root="target/examples-release/$PACKAGE_NAME"
-          mkdir -p "$package_root"
-          cp LICENSE README.md README_cn.md "$package_root/"
-          cp -R examples "$package_root/examples"
-          cat > "$package_root/package.json" <<JSON
-          {
-            "private": true,
-            "type": "module",
-            "scripts": {
-              "install-runtime": "luaskills install-runtime --database none --runtime-root examples/fixture-runtime",
-              "example:basic": "node examples/basic.mjs",
-              "example:query": "node examples/query.mjs",
-              "example:call": "node examples/call.mjs",
-              "example:lifecycle": "node examples/lifecycle.mjs",
-              "example:runtime-lease": "node examples/runtime-lease.mjs",
-              "example:provider-callback": "node examples/provider-callback.mjs"
-            },
-            "dependencies": {
-              "@luaskills/sdk": "$VERSION"
-            }
-          }
-          JSON
-          cat > "$package_root/EXAMPLES_RELEASE.md" <<MARKDOWN
-          # LuaSkills TypeScript SDK Examples $VERSION
-
-          English documentation is the default documentation. For Chinese, see README_cn.md and examples/README_cn.md.
-
-          These examples install and use the published npm package:
-
-          \`\`\`bash
-          npm install
-          npm run install-runtime
-          npm run example:basic
-          npm run example:query
-          npm run example:runtime-lease
-          \`\`\`
-
-          Main repository: https://github.com/LuaSkills/luaskills
-          MARKDOWN
+          python scripts/package-standalone-examples.py stage --root "$package_root" --version "$VERSION"
 
       - name: Install published SDK and runtime assets
         shell: bash
@@ -88,6 +143,7 @@ jobs:
         run: |
           set -euo pipefail
           npm install
+          python "$GITHUB_WORKSPACE/scripts/release/sdk_release.py" installed --artifact "$GITHUB_WORKSPACE/target/formal-sdk-proof/artifact.json" --registry-proof "$GITHUB_WORKSPACE/target/formal-sdk-proof/formal-consumer.json" --root .
           npm run install-runtime
 
       - name: Run published-package smoke examples
@@ -98,25 +154,22 @@ jobs:
           LUASKILLS_EXAMPLE_RUNTIME_ROOT: ${{ github.workspace }}/target/examples-release/${{ steps.version.outputs.package_name }}/examples/fixture-runtime
         run: |
           set -euo pipefail
-          npm run example:basic
-          npm run example:query
-          npm run example:call
-          npm run example:lifecycle
-          npm run example:runtime-lease
-          npm run example:provider-callback
+          mkdir -p "$GITHUB_WORKSPACE/target/smoke"
+          python "$GITHUB_WORKSPACE/scripts/package-standalone-examples.py" smoke --root . > "$GITHUB_WORKSPACE/target/smoke/examples.log"
 
       - name: Package examples asset
         shell: bash
         env:
           PACKAGE_NAME: ${{ steps.version.outputs.package_name }}
           ASSET_NAME: ${{ steps.version.outputs.asset_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p target/release-assets
-          (
-            cd target/examples-release
-            zip -qr "../release-assets/$ASSET_NAME" "$PACKAGE_NAME"
-          )
+          python scripts/package-standalone-examples.py archive \
+            --root "target/examples-release/$PACKAGE_NAME" \
+            --archive "target/release-assets/$ASSET_NAME" \
+            --version "$VERSION"
           (
             cd target/release-assets
             sha256sum "$ASSET_NAME" > "$ASSET_NAME.sha256"
@@ -133,36 +186,108 @@ jobs:
 
           This release contains a standalone examples package for the published npm package \`@luaskills/sdk@$VERSION\`.
 
+          This is a fixed source examples package, not an offline runtime bundle. Run \`npm install\` and \`npm run install-runtime\` from its root; initial installation requires network access. Installed SDKs and platform runtime assets are excluded from the ZIP.
+
           The package was smoke-tested by installing the published SDK, installing LuaSkills runtime assets, and running the bundled examples, including the persistent runtime-session flow.
 
           Main repository: https://github.com/LuaSkills/luaskills
+
+          Formal SDK source: $GITHUB_SHA. The exact published npm tarball passed the authenticated SDK release proof and a new-cache native consumer gate before this examples asset was built.
 
           ## 中文说明
 
           本 Release 包含面向已发布 npm 包 \`@luaskills/sdk@$VERSION\` 的独立示例包。
 
+          这是固定源码示例包，不是离线运行时整包。请从包根运行 \`npm install\` 和 \`npm run install-runtime\`，首次安装需要网络。ZIP 不包含已安装 SDK 或平台运行时资产。
+
           工作流已通过安装正式 SDK、安装 LuaSkills runtime 资产并运行内置示例完成冒烟验证，其中包含持久 runtime-session 流程。
           MARKDOWN
 
-      - name: Publish GitHub Release
-        shell: bash
+      # All subjects are frozen once; recovery downloads these exact bytes instead of creating a new ZIP.
+      # 全部主体仅冻结一次；恢复下载这些精确字节而不创建新 ZIP。
+      - name: Freeze the tested source ZIP and formal SDK consumer
+        id: binding
+        env:
+          MODE: ${{ inputs.mode }}
+          ASSET: ${{ steps.version.outputs.asset_name }}
+        run: |
+          name="$(python scripts/release/sdk_release.py examples-bundle --core-root core-release --repository "$GITHUB_REPOSITORY" --sdk-proof target/formal-sdk-proof --archive "target/release-assets/$ASSET" --sidecar "target/release-assets/$ASSET.sha256" --notes target/release-assets/RELEASE_NOTES.md --smoke-log target/smoke/examples.log --mode "$MODE" --output target/examples-candidate)"
+          echo "artifact_name=$name" >> "$GITHUB_OUTPUT"
+      - name: Officially sign all original examples and the direct recovery binding
+        id: attest
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: target/examples-candidate/*
+      - name: Verify the original examples signature before artifact upload
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
-          VERSION: ${{ steps.version.outputs.version }}
-          ASSET_NAME: ${{ steps.version.outputs.asset_name }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" target/examples-candidate/examples-candidate-attestation.jsonl
+          python scripts/release/sdk_release.py examples-seal --core-root core-release --input target/examples-candidate
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: ${{ steps.binding.outputs.artifact_name }}
+          path: target/examples-candidate/*
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: examples-publish
+    needs: candidate-evidence
+    if: ${{ always() && inputs.mode != 'artifact-only' && (inputs.mode == 'recover' || needs.candidate-evidence.result == 'success') }}
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      COMPLETION_INTENT: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/checkout@v6
+        with:
+          repository: LuaSkills/luaskills
+          ref: ${{ inputs.core_commit }}
+          path: core-release
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Authenticate the explicitly selected original examples before mutation
+        env:
+          SOURCE_SHA: ${{ inputs.sdk_source_sha }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run_id }}
+          CANDIDATE_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact_id }}
+          NEW_ARTIFACT: ${{ needs.candidate-evidence.outputs.artifact_id }}
         run: |
           set -euo pipefail
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" \
-              "target/release-assets/$ASSET_NAME" \
-              "target/release-assets/$ASSET_NAME.sha256" \
-              --clobber
-          else
-            gh release create "$RELEASE_TAG" \
-              "target/release-assets/$ASSET_NAME" \
-              "target/release-assets/$ASSET_NAME.sha256" \
-              --target "$GITHUB_SHA" \
-              --title "LuaSkills TypeScript SDK Examples $VERSION" \
-              --notes-file target/release-assets/RELEASE_NOTES.md
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          if [ "$COMPLETION_INTENT" = publish ]; then
+            CANDIDATE_RUN="$GITHUB_RUN_ID"
+            CANDIDATE_ATTEMPT="$GITHUB_RUN_ATTEMPT"
+            CANDIDATE_ARTIFACT="$NEW_ARTIFACT"
           fi
+          python scripts/release/sdk_release.py examples-fetch --core-root core-release --repository "$GITHUB_REPOSITORY" --sdk-source-sha "$SOURCE_SHA" --candidate-run-id "$CANDIDATE_RUN" --candidate-run-attempt "$CANDIDATE_ATTEMPT" --candidate-artifact-id "$CANDIDATE_ARTIFACT" --output target/authenticated-examples
+      - name: Fresh exact dual-chain SDK proof and cold npm native consumer
+        env:
+          SDK_SHA: ${{ inputs.sdk_source_sha }}
+          SDK_CANDIDATE_RUN: ${{ inputs.sdk_candidate_run_id }}
+          SDK_CANDIDATE_ATTEMPT: ${{ inputs.sdk_candidate_run_attempt }}
+          SDK_COMPLETION_RUN: ${{ inputs.sdk_completion_run_id }}
+          SDK_COMPLETION_ATTEMPT: ${{ inputs.sdk_completion_run_attempt }}
+          SDK_COMPLETION_SHA: ${{ inputs.sdk_completion_source_sha }}
+        run: |
+          version="$(node -e 'process.stdout.write(require("./package.json").version)')"
+          python scripts/release/sdk_release.py tools
+          python scripts/release/sdk_release.py formal-proof --core-root core-release --candidate-run-id "$SDK_CANDIDATE_RUN" --candidate-run-attempt "$SDK_CANDIDATE_ATTEMPT" --completion-run-id "$SDK_COMPLETION_RUN" --completion-run-attempt "$SDK_COMPLETION_ATTEMPT" --completion-source-sha "$SDK_COMPLETION_SHA" --repository "$GITHUB_REPOSITORY" --sdk-source-sha "$SDK_SHA" --sdk-version "$version" --output target/fresh-formal-sdk-proof
+      - name: Complete the independent examples Release using only original signed bytes
+        run: python scripts/release/sdk_release.py publish-examples --core-root core-release --candidate target/authenticated-examples --intent "$COMPLETION_INTENT" --repository "$GITHUB_REPOSITORY" --sdk-proof target/fresh-formal-sdk-proof

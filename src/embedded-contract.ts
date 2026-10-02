@@ -31,13 +31,13 @@ export const EMBEDDED_CONTRACT_VERSION = 1 as const;
  * Generated wire shape for EMBEDDED_CORE_VERSION.
  * EMBEDDED_CORE_VERSION 的生成线形状。
  */
-export const EMBEDDED_CORE_VERSION = "0.5.9" as const;
+export const EMBEDDED_CORE_VERSION = "0.6.0" as const;
 
 /**
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "66e504d36a9bffed4b57b9ce1dd9aa6aaca9030347c57581e3058aac7d69cc3c" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "aaee7bcdbc1d8dd20a6f466f88522b0416b16c46396430d09ca1b7c53d3574c0" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.

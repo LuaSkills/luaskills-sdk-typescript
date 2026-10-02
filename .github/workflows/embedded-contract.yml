@@ -25,6 +25,9 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+      - run: npm run test:embedded-candidate-inputs
+      - run: npm run check:embedded-example
+      - run: npm run test:standalone-examples
       - run: node --test tests/embedded-contract.mjs
       - run: node --test tests/embedded-json.mjs tests/embedded-json-vectors.mjs tests/embedded-compatibility.mjs tests/embedded-native.mjs tests/embedded-driver.mjs tests/embedded-worker.mjs tests/embedded-pump.mjs tests/embedded-client.mjs tests/embedded-scope.mjs
       - name: Pack and verify the exact artifact

@@ -6,7 +6,7 @@ Main LuaSkills repository: [LuaSkills/luaskills](https://github.com/LuaSkills/lu
 
 TypeScript / Node.js SDK for integrating the LuaSkills runtime through the public JSON FFI surface.
 
-`0.5.7` is the current release line. It retains the strict package-level skill configuration contract and defaults runtime assets to LuaSkills core `v0.5.7`, vldb-controller `v0.2.3`, and vldb-sqlite `v0.1.6`.
+This source targets the `0.6.0` release line; publication and artifact verification follow the release workflow. It retains the strict package-level skill configuration contract and defaults runtime assets to LuaSkills core `v0.6.0`, vldb-controller `v0.2.3`, and vldb-sqlite `v0.1.6`.
 
 The SDK wraps native library loading, JSON FFI buffers, engine lifecycle, formal skill roots, authority-aware management calls, skill config, provider callbacks, host-tool callbacks, and runtime asset installation. Hosts should not need to hand-write low-level FFI buffers or JSON envelopes for normal integration.
 
@@ -84,9 +84,23 @@ Run `npm run generate:embedded-contract` to regenerate entirely offline, or `nod
 
 `npm pack` checks the generated files before building. Run `node scripts/verify-embedded-distribution.mjs <archive.tgz>` against that exact local artifact to compare embedded member bytes, import its compiled contract in a fresh process, and run its standalone generator. This development verifier requires the system `tar` command; ordinary offline generation requires only Node.js. The contract CI covers Node 24/26 on Linux, Windows and macOS; it does not constitute native embedded runtime acceptance.
 
+The separate local candidate gate **requires native success**. Run `npm ci` and `npm pack` in the SDK checkout, then:
+
+```text
+npm run test:embedded-candidate -- <absolute-archive.tgz> <absolute-candidate-library> <frozen-library-sha256> <absolute-core-description.json>
+```
+
+All four inputs are mandatory. Missing libraries, invalid binary digests and invalid or mismatched `OutputCoreDescription` fail; no `latest` discovery or skip path exists. The candidate owner must supply the real `luaskills_ffi_embedded_describe_v1` JSON. Existing compatibility checks validate core/description/protocol versions, contract digest, build input hashes and ABI, followed by full-field equality against the loaded core. The binary SHA-256 is checked separately.
+
+The gate reuses artifact verification, independently installs the local tgz in a temporary directory and pins Koffi to the current `package-lock.json` version, registry identity and integrity. Installation uses only the npm cache with scripts disabled; missing cache entries fail. The consumer resolves the public package entry, checks its packaged contract and executes `examples/embedded-candidate.mjs`. This real client/driver/callback-pump/scope example verifies initialization callbacks, explicit VM prewarming, reusable readiness, business callbacks, actual native slot removal and complete worker/transport release. Application integers remain representable by Lua; offline codec vectors separately verify the full u64 range.
+
+Run the example directly with `npm run example:embedded-candidate -- <absolute-candidate-library> <absolute-core-description.json>`. `npm run check:embedded-example` checks its calls against generated types, and `npm run test:embedded-candidate-inputs` verifies mandatory input failures. CI runs these offline checks and actual npm artifact verification. Native gate success applies only to the selected platform/binary; it is not release or other-platform acceptance.
+
+`npm run test:embedded-example-native -- <absolute-candidate-library> <absolute-core-description.json>` exercises real reserve result-release and unused-scope-worker startup failures. The original typed Pending stays discoverable through the live driver until scope closure proves slot removal. Tests verify explicit recovery using the same identity, one reservation, actual response/runtime removal, complete driver/transport release, exact original error objects and both diagnostics when two independent failures occur.
+
 ## Installation
 
-The 0.5.7 SDK requires Node.js 24 LTS or newer.
+The 0.6.0 SDK requires Node.js 24 LTS or newer.
 
 ```bash
 npm install @luaskills/sdk
@@ -113,7 +127,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_as
 RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all vldb-controller
 ```
 
-Supported targets are `all`, `luaskills`, `lua`, and `vldb`. VLDB presets are `none`, `vldb-controller`, `vldb-direct`, and `host-callback`. The scripts pin LuaSkills to `v0.5.7` by default and accept explicit release-version overrides.
+Supported targets are `all`, `luaskills`, `lua`, and `vldb`. VLDB presets are `none`, `vldb-controller`, `vldb-direct`, and `host-callback`. The scripts pin LuaSkills to `v0.6.0` by default and accept explicit release-version overrides.
 
 `install-runtime` downloads GitHub Release assets, verifies `.sha256` sidecars, extracts native files and Lua runtime packages, and writes:
 
@@ -181,7 +195,7 @@ The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime p
 ## Version Alignment
 
 - Keep the SDK and LuaSkills core on the same current release line whenever possible.
-- The current SDK defaults to LuaSkills core tag `v0.5.7`.
+- The current SDK defaults to LuaSkills core tag `v0.6.0`.
 - Runtime packages and native dependencies still come from the split `LuaSkills/luaskills-packages` and related release assets.
 - SDK default host options pass `runtime_root`, null managed-root override slots, and the complete stable `managed_runtime_config`; LuaSkills derives the fixed data layout until the host explicitly overrides roots or policy.
 - Host tools live directly under `runtime_root/bin`, not `runtime_root/bin/tools`.
@@ -669,6 +683,8 @@ Use a new patch version for every npm publish. Published versions cannot be over
 Recommended unified publish order: `luaskills-packages` -> `luaskills` core release -> TypeScript SDK -> Python SDK -> Go SDK -> SDK examples releases.
 
 After npm publishes successfully, run the GitHub Actions workflow **Examples Release** manually. It reads `VERSION`, installs `@luaskills/sdk@{VERSION}` from npm, installs LuaSkills runtime assets, runs the examples, then creates or updates the `examples-v{VERSION}` GitHub Release with:
+
+The standalone ZIP is a fixed source package selected by `scripts/standalone-examples-manifest.json`. The same manifest drives staging, all published-example smoke runs and real ZIP verification through `scripts/package-standalone-examples.py`. Development embedded examples remain inside the npm candidate package. Installed SDKs and platform runtime assets are excluded from the ZIP; consumers run `npm install` and `npm run install-runtime`, with network access required for initial installation. `npm run test:standalone-examples` verifies actual archive membership, exact published dependency/scripts and every local Markdown link target.
 
 - `luaskills-sdk-typescript-examples-{VERSION}.zip`
 - `luaskills-sdk-typescript-examples-{VERSION}.zip.sha256`
