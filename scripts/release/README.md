@@ -2,7 +2,7 @@
 
 本目录拥有 SDK 身份、一次实际 npm 打包、五平台安装消费及正式发布证明。核心平台、归档、描述、工具链和路径解析来自固定核心检出的 `sdk_prerequisites.py`、`SDK_PREREQUISITES.md`。精确 Actions 轮次、制品读取及签名清单来自同一检出的 `sdk_recovery.py`、`SDK_RECOVERY.md`。SDK 不复制这些公共定义。
 
-工作流必须先进入默认分支。dispatch 的 `sdk_source_sha` 必须同时等于实际 SDK HEAD、github.sha 和 workflow SHA；禁止旧 tag 工作流搭配新源码。package.json 是唯一 SDK 版本来源，VERSION 和 lock 镜像必须一致。core_tag/core_commit 独立显式指定，源码及 tgz 内默认核心标签必须匹配前置门禁。此源码面向零点六发布线，包版本、lock、VERSION 与默认核心标签统一为 0.6.0／v0.6.0；发布及资产验收遵循既有流程，正式门禁仍要求匹配经过验收的精确核心身份。
+工作流必须先进入默认分支。dispatch 的 `sdk_source_sha` 必须同时等于实际 SDK HEAD、github.sha 和 workflow SHA；禁止旧 tag 工作流搭配新源码。package.json 是唯一 SDK 版本来源，VERSION 和 lock 镜像必须一致。core_tag/core_commit 独立显式指定，源码及 tgz 内默认核心标签必须匹配前置门禁。此源码面向零点六发布线，包版本、lock、VERSION 与默认核心标签统一为 0.6.1／v0.6.1；发布及资产验收遵循既有流程，正式门禁仍要求匹配经过验收的精确核心身份。
 
 ## 原候选先于任何变更
 
