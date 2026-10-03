@@ -848,26 +848,72 @@ def signed_members(archive):
     return result
 
 
+def existing_workflow_write(repository, content, body):
+    """POST repository's already authenticated content/body once; return True only for the identical HTTP201 blob.
+    对 repository 已认证的 content/body 仅 POST 一次；仅相同 blob 的 HTTP201 返回 True。
+    content is the fixed-source contents record; body is the exact local workflow, never a new tree or ref.
+    content 为固定源码 contents 记录；body 为精确本地工作流，绝不创建新 tree 或 ref。
+    """
+    require(bool(os.environ.get("GH_TOKEN")), "Current GH_TOKEN is required for the existing workflow write gate")
+    # Git's blob header binds the original byte length and bytes to the authenticated contents OID.
+    # Git blob 头将原字节长度及字节绑定到已认证 contents OID。
+    oid = hashlib.sha1(b"blob " + str(len(body)).encode("ascii") + b"\0" + body).hexdigest()
+    require(content["sha"] == oid, "Workflow contents Git blob SHA differs from exact local bytes")
+    # The same blob is content-addressed: this request introduces no tree, commit, tag or reference.
+    # 同一 blob 按内容寻址：此请求不引入 tree、commit、tag 或引用。
+    url = f"https://api.github.com/repos/{repository}/git/blobs"
+    # Use only the current issuing credential and original redirect/body guards, without retries.
+    # 仅使用当前签发凭据和原重定向／正文护栏，不重试。
+    headers = {"Accept": "application/vnd.github+json", "Content-Type": "application/json",
+               "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "luaskills-sdk-release",
+               "Cache-Control": "no-cache", "Authorization": "Bearer " + os.environ["GH_TOKEN"]}
+    # Payload re-encodes the exact existing bytes, independent of the GET record's base64 line wrapping.
+    # payload 重新编码精确既有字节，不受 GET 记录 base64 换行影响。
+    payload = json.dumps({"content": base64.b64encode(body).decode("ascii"), "encoding": "base64"}).encode("utf-8")
+    # Request explicitly carries that payload to the sole authorized POST endpoint.
+    # request 明确将该载荷发送到唯一授权 POST 端点。
+    request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    with urllib.request.build_opener(SafeRedirect()).open(request, timeout=60) as response:
+        require(response.status == 201 and response.geturl() == url,
+                "Existing workflow write must return HTTP 201 from the original blob URL")
+        # Response bytes retain the existing release asset boundary before strict JSON decoding.
+        # 严格 JSON 解码前，响应字节保留既有发布资产边界。
+        result_body = response.read(MAX_RELEASE_ASSET_BYTES)
+        require(len(result_body) < MAX_RELEASE_ASSET_BYTES, "Release asset exceeds the GitHub asset size limit")
+    # Both response identities must describe precisely the already authenticated blob in this repository.
+    # 两个响应身份必须精确描述此仓库中已认证的既有 blob。
+    result = json.loads(result_body, object_pairs_hook=pairs)
+    require(result["sha"] == oid and result["url"] == url + "/" + oid,
+            "Existing workflow write returned a different Git blob identity")
+    return True
+
+
 def publication_preflight(args):
     """Check current token write permission, default-branch source, and immutable SDK tag before npm.
     在 npm 发布前检查当前令牌写权限、默认分支源码与不可变 SDK 标签。
     """
+    require(bool(os.environ.get("GH_TOKEN")), "Current GH_TOKEN is required for the existing workflow write gate")
     repository = github_request(args.repository, "")
-    require(repository["full_name"] == args.repository and repository["permissions"]["push"] is True,
-            "Current GITHUB_TOKEN must have repository content write permission")
+    require(repository["full_name"] == args.repository, "SDK repository identity differs from its issuing source")
     reference = github_request(args.repository, "git/ref/heads/" + urllib.parse.quote(repository["default_branch"], safe=""))
     require(reference["object"]["type"] == "commit" and reference["object"]["sha"] == args.sdk_source_sha,
             "Authority workflow/SDK must already be on the unchanged default branch")
     content = github_request(args.repository, "contents/.github/workflows/sdk-release.yml?ref=" + args.sdk_source_sha)
+    # Original local workflow bytes are the sole allowed write subject, never a caller-provided payload.
+    # 原本地工作流字节是唯一允许写入主体，绝非调用者提供的载荷。
+    body = (ROOT / SDK_WORKFLOW).read_bytes()
     require(content["type"] == "file" and content["encoding"] == "base64"
-            and base64.b64decode(content["content"]) == (ROOT / ".github/workflows/sdk-release.yml").read_bytes(),
+            and base64.b64decode(content["content"]) == body,
             "Default branch SDK workflow/source is missing or differs")
     try:
         resolve_sdk_tag(args.repository, "v" + args.version, args.sdk_source_sha)
     except SDKTagMissing:
         pass
+    # Actual Contents/write acceptance must precede npm; repository metadata roles cannot establish it.
+    # 实际 Contents/write 验收必须先于 npm；仓库元数据角色不能建立该权限。
+    contents_write = existing_workflow_write(args.repository, content, body)
     write_json(args.output, {"sdk_source_sha": args.sdk_source_sha, "sdk_version": args.version,
-                           "repository": args.repository, "default_branch": repository["default_branch"], "contents_write": True})
+                           "repository": args.repository, "default_branch": repository["default_branch"], "contents_write": contents_write})
 
 
 def immutable_upload(repository, tag, commit, files, title, notes):
