@@ -10,6 +10,7 @@ import io
 import json
 import os
 import hashlib
+import shutil
 import zipfile
 import tarfile
 import tempfile
@@ -888,10 +889,18 @@ class ReleaseGateTests(unittest.TestCase):
         shared = self.shared_fixture()
         shared.Http = lambda: self.http
         stack = contextlib.ExitStack()
+        # The exact resolver instance is retained for assertions about both packing stages.
+        # 保留精确解析器实例，用于断言两个打包阶段。
+        stack.shared = shared
         stack.enter_context(patch.object(RELEASE, "authority", return_value=CORE))
         stack.enter_context(patch.object(RELEASE, "shared_gate", return_value=shared))
         stack.enter_context(patch.object(RELEASE, "recovery_authority", return_value=(RECOVERY, shared)))
         stack.enter_context(patch.object(RELEASE, "run", side_effect=self.recovery_command))
+        # These pre-existing orchestration fixtures intentionally lack actual Core archive/native inputs.
+        # 这些既有编排夹具刻意不包含实际 Core 归档及原生输入。
+        stack.core_selection = stack.enter_context(patch.object(RELEASE, "core_proof_members",
+            side_effect=lambda report, _: {path.relative_to(Path(report).parent).as_posix(): path
+                                           for path in sorted(Path(report).parent.rglob("*")) if path.is_file()}))
         return stack
 
     def original_candidate_fixture(self):
@@ -916,10 +925,11 @@ class ReleaseGateTests(unittest.TestCase):
         directory = self.root / "signed-candidate"
         args = SimpleNamespace(core_root=OPTIONS.core_root, repository="test/repo", mode="artifact-only", artifact=self.artifact,
             aggregate=self.args.output, prerequisites=core / "prerequisites.json", evidence_dir=self.evidence, output=directory)
-        with self.recovery_context(), patch.dict(os.environ, self.recovery_environment()):
+        with self.recovery_context() as context, patch.dict(os.environ, self.recovery_environment()):
             with contextlib.redirect_stdout(io.StringIO()) as stdout:
                 RELEASE.candidate_bundle(args)
             self.assertEqual(stdout.getvalue().strip(), RECOVERY.candidate_artifact_name(123, 2))
+            context.core_selection.assert_called_once_with(args.prerequisites, context.shared)
         self.fixture_signature(directory, RELEASE.CANDIDATE_ATTESTATION, 123, 2)
         with self.recovery_context(), patch.dict(os.environ, self.recovery_environment()):
             RELEASE.candidate_seal(SimpleNamespace(core_root=OPTIONS.core_root, input=directory))
@@ -1029,10 +1039,11 @@ class ReleaseGateTests(unittest.TestCase):
         RELEASE.write_json(main, self.releases[11])
         args = SimpleNamespace(core_root=OPTIONS.core_root, repository="test/repo", candidate=root, intent="recover", consumer=consumer,
             aggregate=proof, prerequisites=core, main_release=main, output=self.root / "completion")
-        with self.recovery_context(), patch.object(RELEASE,"github_request",side_effect=self.recovery_reader), patch.dict(os.environ,self.recovery_environment(456,3,"recover")):
+        with self.recovery_context() as context, patch.object(RELEASE,"github_request",side_effect=self.recovery_reader), patch.dict(os.environ,self.recovery_environment(456,3,"recover")):
             RELEASE.aggregate(SimpleNamespace(core_root=OPTIONS.core_root, artifact=root/"original"/RELEASE.RELEASE_FILES["artifact"],
                 prerequisites=core,evidence_dir=root/"native-evidence",output=proof))
             RELEASE.completion_bundle(args)
+            context.core_selection.assert_called_once_with(args.prerequisites, context.shared)
         self.fixture_signature(args.output, RELEASE.COMPLETION_ATTESTATION, 456, 3)
         self.release_files[22] = {p.name:p.read_bytes() for p in args.output.iterdir()}
         self.releases[22] = {"id":22,"tag_name":RELEASE.completion_tag(self.identity["sdk_version"],456,3),"draft":False,"prerelease":False,"immutable":False}
@@ -1380,6 +1391,50 @@ class ReleaseGateTests(unittest.TestCase):
              self.assertRaisesRegex(ValueError, "exact formal release"):
             RELEASE.publish_candidate(args)
         self.assertFalse(args.output.exists())
+
+
+class CoreProofSelectionTests(unittest.TestCase):
+    """Exercise original complete Core bytes with the real resolver; return no publication evidence.
+    使用真实解析器验证原完整 Core 字节；不产生发布证明。
+    """
+
+    @unittest.skipUnless("SDK_RELEASE_TEST_CORE_PROOF" in os.environ, "Explicit original complete Core proof required")
+    def test_audit_retention_missing_required_and_tampered_copy(self):
+        """Select original proof, retain every audit file, and reject missing/tampered bytes without synthetic large data.
+        选择原证明、保留全部审计文件，并拒绝缺失、篡改字节，不合成大数据。
+        """
+        # Original is read-only; an independent short-path copy avoids Windows hard-link path limits.
+        # Original 只读；独立短路径副本避免 Windows 硬链接路径上限。
+        original = Path(os.environ["SDK_RELEASE_TEST_CORE_PROOF"]).resolve(strict=True)
+        with tempfile.TemporaryDirectory(prefix="cp-") as temporary:
+            # Root contains actual producer bytes, not a mirrored synthetic Core protocol.
+            # Root 包含实际生产者字节，不是镜像合成 Core 协议。
+            root = Path(temporary) / "core"
+            shutil.copytree(original, root, copy_function=shutil.copyfile)
+            # Selected mapping is validated by all five actual Core archive/source/native checks.
+            # Selected 映射经过全部五平台实际 Core 归档、源码、原生校验。
+            selected = RELEASE.core_proof_members(root / "prerequisites.json", SHARED)
+            self.assertIn("candidate/luaskills-ffi-sdk-windows-x64.tar.gz", selected)
+            self.assertNotIn("candidate/luaskills-demo-ffi-windows-x64.tar.gz", selected)
+            self.assertNotIn("downloads/assets/luaskills-ffi-sdk-windows-x64.tar.gz", selected)
+            for path in (root / "registry").rglob("*"):
+                if path.is_file():
+                    self.assertEqual(selected[path.relative_to(root).as_posix()].read_bytes(), path.read_bytes())
+            # Required authenticated manifest cannot be omitted even when all audit bytes still exist.
+            # 即使全部审计字节仍在，也不得省略必需的已认证清单。
+            required = root / "downloads/candidate-manifest.json"
+            required.unlink()
+            with self.assertRaises(FileNotFoundError):
+                RELEASE.core_proof_members(root / "prerequisites.json", SHARED)
+            shutil.copyfile(original / "downloads/candidate-manifest.json", required)
+            # A discarded archive copy still requires its actual official SHA before selection can omit it.
+            # 被省略的归档副本仍须符合实际正式 SHA，选择函数才能省略。
+            source = CORE.read_json(root / "candidate/candidate-manifest.json")["source_archive"]["name"]
+            copy = root / "downloads/assets" / source
+            copy.unlink()
+            copy.write_bytes(b"tampered archive copy")
+            with self.assertRaisesRegex(ValueError, "differs from official asset"):
+                RELEASE.core_proof_members(root / "prerequisites.json", SHARED)
 
 
 if __name__ == "__main__":
