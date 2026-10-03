@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /**
@@ -18,7 +18,13 @@ export function verifyDistribution(archive) {
   // 系统 tar 将精确成员读到标准输出；不会解压任意归档路径。
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const filename = resolve(archive);
-  const members = execFileSync("tar", ["-tzf", filename], { encoding: "utf8" }).trimEnd().split(/\r?\n/);
+  // Keep the drive letter in cwd; GNU tar treats a colon in the archive argument as a remote host.
+  // 将盘符保留在 cwd 中；GNU tar 将归档参数中的冒号解释为远程主机。
+  const archiveDirectory = dirname(filename);
+  // Use the same local basename for both reads; ./ prevents the filename from becoming an option.
+  // 两次读取使用同一个本地基本文件名；./ 防止文件名被解释为选项。
+  const archiveName = `./${basename(filename)}`;
+  const members = execFileSync("tar", ["-tzf", archiveName], { cwd: archiveDirectory, encoding: "utf8" }).trimEnd().split(/\r?\n/);
   assert.equal(new Set(members).size, members.length, "Duplicate archive members");
   // Only these explicitly declared files may be materialized under the isolated directory.
   // 仅可将这些显式声明文件落盘到隔离目录内。
@@ -33,7 +39,7 @@ export function verifyDistribution(archive) {
   try {
     for (const relative of expected) {
       assert.ok(members.includes(`package/${relative}`), `Missing npm member: ${relative}`);
-      const bytes = execFileSync("tar", ["-xOzf", filename, `package/${relative}`]);
+      const bytes = execFileSync("tar", ["-xOzf", archiveName, `package/${relative}`], { cwd: archiveDirectory });
       assert.deepEqual(bytes, readFileSync(join(root, relative)), `Changed npm bytes: ${relative}`);
       const output = join(temporary, relative);
       mkdirSync(dirname(output), { recursive: true });
