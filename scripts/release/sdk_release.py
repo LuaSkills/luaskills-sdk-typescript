@@ -728,7 +728,10 @@ def github_request(repository, path, binary=False):
                "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "luaskills-sdk-release", "Cache-Control": "no-cache"}
     if "GH_TOKEN" in os.environ:
         headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
-    request = urllib.request.Request(f"https://api.github.com/repos/{repository}/{path}", headers=headers)
+    # The repository root is the exact no-slash endpoint; nonempty REST paths retain their original bytes.
+    # 仓库根为精确无尾斜杠端点；非空 REST 路径保留原字节。
+    url = f"https://api.github.com/repos/{repository}" + ("" if path == "" else "/" + path)
+    request = urllib.request.Request(url, headers=headers)
     with urllib.request.build_opener(SafeRedirect()).open(request, timeout=60) as response:
         content = response.read(MAX_RELEASE_ASSET_BYTES)
         require(len(content) < MAX_RELEASE_ASSET_BYTES, "Release asset exceeds the GitHub asset size limit")

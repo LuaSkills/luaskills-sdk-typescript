@@ -1682,5 +1682,107 @@ class ArtifactMediaTests(unittest.TestCase):
         self.assertTrue(all(size == shared.MAX_BODY_BYTES + 1 for size in reads))
 
 
+class RepositoryRootTests(unittest.TestCase):
+    """Exercise the real preflight and Request/opener chain with exact offline repository routes.
+    使用精确离线仓库路由测试真实 preflight 及 Request/opener 链。
+    """
+
+    def test_root_preflight_and_nonempty_request_guards(self):
+        """Require canonical root success and original permission/source/workflow/tag/asset behavior; return nothing.
+        要求规范根成功并保留原权限／源码／工作流／标签／资产行为；无返回值。
+        """
+        # Only the HTTPS network handler is a fixture; the original Request, opener and SafeRedirect remain real.
+        # 仅 HTTPS 网络 handler 为夹具；原 Request、opener 及 SafeRedirect 保持真实。
+        import urllib.response
+        # Base is the exact repository root, source is the frozen commit fixture, and workflow is its actual encoded definition.
+        # base 为精确仓库根，source 为冻结提交夹具，workflow 为其实际编码工作流定义。
+        base = "https://api.github.com/repos/test/repo"
+        source = "a" * 40
+        workflow = RELEASE.base64.b64encode((ROOT / ".github/workflows/sdk-release.yml").read_bytes()).decode()
+        # Routes map each complete API URL to its original JSON or binary response; no path normalization is allowed.
+        # routes 将各完整 API URL 映射到原 JSON 或二进制响应；禁止路径规范化。
+        routes = {base: {"full_name": "test/repo", "permissions": {"push": True}, "default_branch": "main"},
+                  base + "/git/ref/heads/main": {"object": {"type": "commit", "sha": source}},
+                  base + "/git/ref/heads/other": {"object": {"type": "commit", "sha": "b" * 40}},
+                  base + "/contents/.github/workflows/sdk-release.yml?ref=" + source:
+                      {"type": "file", "encoding": "base64", "content": workflow},
+                  base + "/git/ref/tags/v0.6.1": {"ref": "refs/tags/v0.6.1", "object": {"type": "commit", "sha": source}},
+                  base + "/releases/assets/7": b"unchanged binary asset"}
+        # Requests record nonsecret transport facts; redirects retain supplied handlers; builder is the original opener factory.
+        # requests 记录非秘密传输事实；redirects 保留传入 handlers；builder 为原 opener 工厂。
+        requests, redirects = [], []
+        builder = RELEASE.urllib.request.build_opener
+
+        class OfflineHTTPS(RELEASE.urllib.request.HTTPSHandler):
+            """Return declared route bytes and a genuine HTTP404 for the noncanonical trailing-slash root.
+            返回已声明路由字节，并对不规范尾斜杠根返回真正 HTTP404。
+            """
+
+            def https_open(self, request):
+                """Record safe Request facts and return an original opener-compatible response for its URL.
+                记录安全 Request 事实并为其 URL 返回兼容原 opener 的响应。
+                """
+                requests.append((request.full_url, request.get_header("Accept"), request.get_method(), request.timeout))
+                # No URL normalization occurs in the network fixture, so the original root bug stays observable.
+                # 网络夹具不规范化 URL，确保原根路径缺陷保持可观察。
+                # Body and status carry exact fixture response bytes and HTTP state; value is the selected route record.
+                # body 与 status 承载精确夹具响应字节及 HTTP 状态；value 为选中路由记录。
+                if request.full_url == base + "/":
+                    body, status = b'{"message":"Not Found"}', 404
+                else:
+                    value = routes[request.full_url]
+                    body, status = (value if isinstance(value, bytes) else json.dumps(value).encode()), 200
+                # Response reaches the original HTTP error processor, so HTTP404 is raised through the real opener.
+                # response 进入原 HTTP 错误处理器，使 HTTP404 经真实 opener 抛出。
+                response = urllib.response.addinfourl(io.BytesIO(body), {"Content-Type": "application/json"}, request.full_url, status)
+                response.msg = "Not Found" if status == 404 else "OK"
+                return response
+
+        def build_with_network_fixture(*handlers):
+            """Retain passed original handlers and add only offline HTTPS I/O; return the real opener.
+            保留传入原 handlers 且仅添加离线 HTTPS I/O；返回真实 opener。
+            """
+            redirects.extend(handlers)
+            return builder(*handlers, OfflineHTTPS())
+
+        with tempfile.TemporaryDirectory(prefix="ls-root-") as temporary, \
+                patch.object(RELEASE.urllib.request, "build_opener", side_effect=build_with_network_fixture):
+            # Actual preflight writes only a local successful receipt after every original gate returns.
+            # 真实 preflight 仅在每个原门禁返回后写入本地成功回执。
+            # Output is the fresh receipt path; arguments bind the exact repository, source and version to that receipt.
+            # output 为全新回执路径；arguments 将精确仓库、源码及版本绑定到该回执。
+            output = Path(temporary) / "valid.json"
+            arguments = SimpleNamespace(repository="test/repo", sdk_source_sha=source, version="0.6.1", output=output)
+            RELEASE.publication_preflight(arguments)
+            self.assertTrue(output.is_file())
+            self.assertEqual(requests[0], (base, "application/vnd.github+json", "GET", 60))
+            self.assertEqual(RELEASE.github_request("test/repo", "releases/assets/7", binary=True), b"unchanged binary asset")
+            self.assertEqual(requests[-1], (base + "/releases/assets/7", "application/octet-stream", "GET", 60))
+            # Mutated API facts still fail in real preflight, never a mocked helper or weakened permission gate.
+            # 变化 API 事实仍在真实 preflight 内失败，绝不使用被 mock helper 或放宽权限门禁。
+            # Mutations identify the exact URL, field, replacement and expected original rejection message.
+            # mutations 指定精确 URL、字段、替换值及预期原拒绝消息。
+            mutations = ((base, "permissions", {"push": False}, "write permission"),
+                         (base, "default_branch", "other", "unchanged default branch"),
+                         (base + "/git/ref/heads/main", "object", {"type": "commit", "sha": "b" * 40}, "unchanged default branch"),
+                         (base + "/contents/.github/workflows/sdk-release.yml?ref=" + source, "content", RELEASE.base64.b64encode(b"edited workflow").decode(), "differs"),
+                         (base + "/git/ref/tags/v0.6.1", "object", {"type": "commit", "sha": "b" * 40}, "tag/source mismatch"))
+            for index, (url, key, changed, message) in enumerate(mutations):
+                # Index selects a fresh receipt; url/key select the fact, changed replaces it, and message binds its rejection.
+                # index 选择全新回执；url/key 选择事实，changed 替换事实，message 绑定其拒绝原因。
+                with self.subTest(key=key, url=url):
+                    # Original restores the sole mutated fact after its rejection without contaminating another case.
+                    # original 在拒绝后恢复唯一变化事实，避免污染另一用例。
+                    original = routes[url][key]
+                    routes[url][key] = changed
+                    arguments.output = Path(temporary) / (str(index) + ".json")
+                    with self.assertRaisesRegex(ValueError, message):
+                        RELEASE.publication_preflight(arguments)
+                    self.assertFalse(arguments.output.exists())
+                    routes[url][key] = original
+            self.assertTrue(redirects)
+            self.assertTrue(all(isinstance(handler, RELEASE.SafeRedirect) for handler in redirects))
+
+
 if __name__ == "__main__":
     unittest.main(argv=[__file__, *TEST_ARGUMENTS])
