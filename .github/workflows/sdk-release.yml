@@ -50,6 +50,10 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       core_host_platform: ${{ steps.matrix.outputs.core_host_platform }}
     steps:
+      # Preserve Git blob bytes so checkout cannot change authenticated source digests.
+      # 保留 Git blob 原字节，避免检出改变已认证的源摘要。
+      - name: Preserve exact tracked source bytes
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
@@ -148,6 +152,10 @@ jobs:
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
+      # Preserve Git blob bytes so checkout cannot change authenticated source digests.
+      # 保留 Git blob 原字节，避免检出改变已认证的源摘要。
+      - name: Preserve exact tracked source bytes
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
@@ -189,6 +197,10 @@ jobs:
     needs: [prepare, native]
     runs-on: ubuntu-24.04
     steps:
+      # Preserve Git blob bytes so checkout cannot change authenticated source digests.
+      # 保留 Git blob 原字节，避免检出改变已认证的源摘要。
+      - name: Preserve exact tracked source bytes
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
@@ -235,6 +247,10 @@ jobs:
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
     steps:
+      # Preserve Git blob bytes so checkout cannot change authenticated source digests.
+      # 保留 Git blob 原字节，避免检出改变已认证的源摘要。
+      - name: Preserve exact tracked source bytes
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
@@ -306,6 +322,10 @@ jobs:
       CORE_TAG: ${{ inputs.core_tag }}
       CORE_COMMIT: ${{ inputs.core_commit }}
     steps:
+      # Preserve Git blob bytes so checkout cannot change authenticated source digests.
+      # 保留 Git blob 原字节，避免检出改变已认证的源摘要。
+      - name: Preserve exact tracked source bytes
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
