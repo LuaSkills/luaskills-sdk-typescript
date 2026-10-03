@@ -1325,6 +1325,77 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertEqual(sdk.count("      actions: read"),2)
         self.assertEqual(examples.count("      actions: read"),2)
 
+    @unittest.skipUnless("SDK_RELEASE_TEST_CORE_PROOF" in os.environ, "Explicit original complete Core proof required")
+    def test_workflow_output_uses_binding_after_pretty_core_stdout(self):
+        """Execute the real workflow consumer after original Core JSON and an actual unit candidate binding; return nothing.
+        在原 Core JSON 与实际单测候选绑定后执行真实工作流消费者；无返回值。
+        The producer alone replays frozen stdout; the consumer imports the unchanged SDK/Core authorities and writes its real envfile.
+        仅生产者重放冻结 stdout；消费者导入未变 SDK/Core 权威并写入实际环境文件。
+        """
+        # Bash is the workflow's actual shell, never a substitute envfile parser.
+        # Bash 是工作流实际 shell，绝不使用替代环境文件解析器。
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("Actual workflow Bash is required")
+        # This existing fixture runs candidate_bundle itself with explicit unit-only native/HTTP boundaries.
+        # 此既有夹具实际执行 candidate_bundle，原生与 HTTP 边界明确仅属单测。
+        directory, files = self.original_candidate_fixture()
+        # Binding comes from that real producer and retains Core's sole filename/name authority.
+        # Binding 来自该真实生产者，保持 Core 唯一文件名及名称权威。
+        binding = RELEASE.read_json(directory / RECOVERY.BINDING_FILENAME)
+        # Original producer files use the same Core encode bytes that sdk_inputs prints to stdout.
+        # 原生产者文件使用与 sdk_inputs 打印到 stdout 相同的 Core encode 字节。
+        original = Path(os.environ["SDK_RELEASE_TEST_CORE_PROOF"]).resolve(strict=True)
+        # Two complete resolver passes preserve the actual aggregate/selector multiline output shape.
+        # 两轮完整解析保持实际汇总及选择器的多行输出形状。
+        printed = "".join((original / "sdk-inputs" / platform / "sdk-validation-inputs.json").read_text(encoding="utf-8")
+                          for platform in CORE.PLATFORMS) * 2 + binding["artifact_name"] + "\n"
+        (self.root / "producer.stdout.log").write_text(printed, encoding="utf-8")
+        # Stage real SDK/Core Python source and every original fixture subject for the untouched consumer.
+        # 暂存真实 SDK/Core Python 源及全部原夹具主体，供未替换的消费者执行。
+        scripts = self.root / "scripts/release"
+        scripts.mkdir(parents=True)
+        shutil.copyfile(ROOT / "scripts/release/sdk_release.py", scripts / "sdk_release.py")
+        shutil.copytree(Path(OPTIONS.core_root) / "scripts/release", self.root / "core-release/scripts/release",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        # Destination follows the real workflow's single candidate directory.
+        # Destination 遵循真实工作流唯一候选目录。
+        destination = self.root / "target/original-candidate"
+        shutil.copytree(directory, destination)
+        # Read the sole named step from the actual workflow, including its production output commands.
+        # 从实际工作流读取唯一命名步骤，包括生产输出命令。
+        workflow = (ROOT / RELEASE.SDK_WORKFLOW).read_text(encoding="utf-8")
+        # Match only this existing step boundary; no candidate path or field guessing occurs.
+        # 仅匹配此既有步骤边界，不猜测候选路径或字段。
+        step = RELEASE.re.search(r"^      - name: Freeze all original tested subjects before any publication\n"
+                                 r"(.*?)(?=^      - )", workflow, RELEASE.re.MULTILINE | RELEASE.re.DOTALL)
+        self.assertIsNotNone(step)
+        # Body preserves the workflow's actual shell commands after removing YAML indentation.
+        # Body 去除 YAML 缩进后保留工作流实际 shell 命令。
+        body = "\n".join(line[10:] for line in step.group(1).split("        run: |\n", 1)[1].splitlines()) + "\n"
+        # Replay only the candidate CLI boundary; inline Python, JSON reads and envfile writes execute unchanged.
+        # 仅重放候选 CLI 边界；内联 Python、JSON 读取及环境文件写入均原样执行。
+        producer = ('python() {\n'
+                    '  if [[ "$1" == "scripts/release/sdk_release.py" && "$2" == "candidate-bundle" ]]; then\n'
+                    '    cat producer.stdout.log\n'
+                    '  else\n'
+                    '    command python "$@"\n'
+                    '  fi\n'
+                    '}\n')
+        # Environment selects the real fixture run and a fresh actual GitHub output file.
+        # Environment 选择真实夹具运行及新建实际 GitHub 输出文件。
+        environment = {**os.environ, "GITHUB_REPOSITORY": "test/repo", "MODE": "artifact-only",
+                       "GITHUB_OUTPUT": str(self.root / "github-output")}
+        # Execute the original Bash consumer; this is not a mirrored Python envfile implementation.
+        # 执行原 Bash 消费者，不以镜像 Python 环境文件实现替代。
+        completed = RELEASE.subprocess.run([bash, "-euo", "pipefail", "-c", producer + body], cwd=self.root,
+                                           env=environment, capture_output=True, text=True, encoding="utf-8", timeout=60)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertEqual((self.root / "github-output").read_text(encoding="utf-8"),
+                         "artifact_name=" + binding["artifact_name"] + "\n")
+        self.assertEqual(completed.stdout, printed)
+        self.assertEqual({path.name: path.read_bytes() for path in destination.iterdir()}, files)
+
     def test_extra_asset_in_initial_final_or_late_draft_never_becomes_valid_release(self):
         """Reject extra root subjects at every actual asset snapshot, before public edit when observable.
         在每个实际资产快照拒绝多余根主体；可观察时在公开变更前拒绝。

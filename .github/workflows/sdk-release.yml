@@ -125,6 +125,10 @@ jobs:
       - name: Install locked build dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Build and pack exactly once
+        env:
+          # Use the completed prerequisite tree so both original-Core behavior tests execute in this production step.
+          # 使用完整前置证明树，使两项原 Core 行为测试在此生产步骤实际执行。
+          SDK_RELEASE_TEST_CORE_PROOF: target/core-prerequisites
         shell: bash
         run: |
           set -euo pipefail
@@ -280,7 +284,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MODE: ${{ inputs.mode }}
         run: |
-          name="$(python scripts/release/sdk_release.py candidate-bundle --core-root core-release --artifact target/sdk-release/artifact.json --aggregate target/sdk-release/aggregate.json --prerequisites target/core-prerequisites/prerequisites.json --evidence-dir target/native-evidence --repository "$GITHUB_REPOSITORY" --mode "$MODE" --output target/original-candidate)"
+          python scripts/release/sdk_release.py candidate-bundle --core-root core-release --artifact target/sdk-release/artifact.json --aggregate target/sdk-release/aggregate.json --prerequisites target/core-prerequisites/prerequisites.json --evidence-dir target/native-evidence --repository "$GITHUB_REPOSITORY" --mode "$MODE" --output target/original-candidate
+          # Core validation prints multiline JSON; the original binding alone owns the single-line artifact name.
+          # Core 验证打印多行 JSON；仅原始绑定拥有单行制品名。
+          name="$(python -c 'from pathlib import Path; from scripts.release import sdk_release; sdk_release.authority("core-release"); recovery, _ = sdk_release.recovery_authority("core-release"); print(sdk_release.read_json(Path("target/original-candidate") / recovery.BINDING_FILENAME)["artifact_name"])')"
           echo "artifact_name=$name" >> "$GITHUB_OUTPUT"
       - name: Officially sign every original subject and the direct recovery binding
         id: attest
