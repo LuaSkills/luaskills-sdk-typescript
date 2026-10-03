@@ -1089,6 +1089,39 @@ def materialize_candidate_core(args, directory, state):
     return prerequisites_path
 
 
+class ArtifactHttp:
+    """Adapt only an explicitly bound Actions artifact ZIP's Accept using the original Core HTTP instance.
+    仅使用原 Core HTTP 实例适配明确绑定 Actions 制品 ZIP 的 Accept。
+    """
+
+    def __init__(self, http, repository, artifact_id):
+        """Retain http and bind repository/artifact_id to one exact ZIP URL; return no value.
+        保留 http 并将 repository/artifact_id 绑定到唯一精确 ZIP URL；无返回值。
+        Core download_artifact validates these explicit identities before any request.
+        Core download_artifact 在任何请求前验证这些明确身份。
+        """
+        # The same Core instance retains its opener, credentials, HTTPS rules and body limit.
+        # 同一 Core 实例保留其 opener、凭据、HTTPS 规则及正文界限。
+        self.http = http
+        # GitHub's Actions ZIP endpoint requires JSON Accept even though the redirected body is ZIP bytes.
+        # GitHub Actions ZIP 端点要求 JSON Accept，尽管重定向后的正文是 ZIP 字节。
+        self.archive_url = f"https://api.github.com/repos/{repository}/actions/artifacts/{artifact_id}/zip"
+
+    def json(self, url):
+        """Delegate url's JSON read and decoding to the same Core HTTP; return its object unchanged.
+        将 url 的 JSON 读取及解码委托同一 Core HTTP；原样返回其对象。
+        """
+        return self.http.json(url)
+
+    def get(self, url, binary=False):
+        """Read url with binary's original media except the bound ZIP; return original bytes/headers.
+        按 binary 原媒体读取 url，仅绑定 ZIP 例外；返回原字节／响应头。
+        """
+        # Core's binary flag only chooses Accept; false still returns bounded raw bytes without JSON decoding.
+        # Core 的 binary 标志仅选择 Accept；false 仍返回有界原字节，不作 JSON 解码。
+        return self.http.get(url, binary=False if url == self.archive_url and binary is True else binary)
+
+
 def candidate_fetch(args):
     """Download the explicit original artifact, authenticate its exact attempt/signature, then restore its immutable files.
     下载明确原制品，认证其精确轮次、签名，然后恢复不可变文件。
@@ -1098,7 +1131,7 @@ def candidate_fetch(args):
     require(run(["git", "rev-parse", "HEAD"]) == args.sdk_source_sha, "Recovery verifier must use the exact original SDK source")
     actual = recovery.verify_attempt(shared.Http(), repository=args.repository, workflow_path=SDK_WORKFLOW, source_sha=args.sdk_source_sha,
         run_id=int(args.candidate_run_id), run_attempt=int(args.candidate_run_attempt), required_jobs=candidate_jobs(args.core_root), phase="candidate")
-    download, files = recovery.download_artifact(shared.Http(), repository=args.repository, source_sha=args.sdk_source_sha,
+    download, files = recovery.download_artifact(ArtifactHttp(shared.Http(), args.repository, int(args.candidate_artifact_id)), repository=args.repository, source_sha=args.sdk_source_sha,
         run_id=int(args.candidate_run_id), artifact_id=int(args.candidate_artifact_id),
         artifact_name=recovery.candidate_artifact_name(int(args.candidate_run_id), int(args.candidate_run_attempt)))
     directory = Path(args.output).resolve()
@@ -1120,7 +1153,7 @@ def local_candidate(args):
     recovery, shared = recovery_authority(args.core_root)
     actual = recovery.verify_attempt(shared.Http(), repository=args.repository, workflow_path=SDK_WORKFLOW, source_sha=header["sdk_source_sha"],
         run_id=header["candidate_run_id"], run_attempt=header["candidate_run_attempt"], required_jobs=candidate_jobs(args.core_root), phase="candidate")
-    download, files = recovery.download_artifact(shared.Http(), repository=args.repository, source_sha=header["sdk_source_sha"],
+    download, files = recovery.download_artifact(ArtifactHttp(shared.Http(), args.repository, header["candidate_artifact_id"]), repository=args.repository, source_sha=header["sdk_source_sha"],
         run_id=header["candidate_run_id"], artifact_id=header["candidate_artifact_id"],
         artifact_name=recovery.candidate_artifact_name(header["candidate_run_id"], header["candidate_run_attempt"]))
     require(files == {path.name: path.read_bytes() for path in (root / "original").iterdir() if path.is_file()}, "Original local candidate differs from its exact authenticated artifact")
@@ -1552,7 +1585,7 @@ def examples_fetch(args):
     actual = recovery.verify_attempt(shared.Http(), repository=args.repository, workflow_path=EXAMPLES_WORKFLOW,
         source_sha=args.sdk_source_sha, run_id=int(args.candidate_run_id), run_attempt=int(args.candidate_run_attempt),
         required_jobs=[workflow_job_name(EXAMPLES_WORKFLOW, "candidate-evidence")], phase="candidate")
-    download, files = recovery.download_artifact(shared.Http(), repository=args.repository, source_sha=args.sdk_source_sha,
+    download, files = recovery.download_artifact(ArtifactHttp(shared.Http(), args.repository, int(args.candidate_artifact_id)), repository=args.repository, source_sha=args.sdk_source_sha,
         run_id=int(args.candidate_run_id), artifact_id=int(args.candidate_artifact_id),
         artifact_name=recovery.candidate_artifact_name(int(args.candidate_run_id), int(args.candidate_run_attempt)))
     directory = Path(args.output).resolve()
@@ -1574,7 +1607,7 @@ def local_examples(args):
     actual = recovery.verify_attempt(shared.Http(), repository=args.repository, workflow_path=EXAMPLES_WORKFLOW, source_sha=header["sdk_source_sha"],
         run_id=header["candidate_run_id"], run_attempt=header["candidate_run_attempt"],
         required_jobs=[workflow_job_name(EXAMPLES_WORKFLOW, "candidate-evidence")], phase="candidate")
-    download, files = recovery.download_artifact(shared.Http(), repository=args.repository, source_sha=header["sdk_source_sha"],
+    download, files = recovery.download_artifact(ArtifactHttp(shared.Http(), args.repository, header["candidate_artifact_id"]), repository=args.repository, source_sha=header["sdk_source_sha"],
         run_id=header["candidate_run_id"], artifact_id=header["candidate_artifact_id"],
         artifact_name=recovery.candidate_artifact_name(header["candidate_run_id"], header["candidate_run_attempt"]))
     require(files == {path.name: path.read_bytes() for path in (root / "original").iterdir() if path.is_file()}, "Original local examples changed")
