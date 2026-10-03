@@ -171,6 +171,9 @@ def recovery_authority(core_root):
     """Import the frozen core's recovery API and its authenticated HTTP transport; return both modules.
     导入冻结核心的恢复 API 及认证 HTTP 传输；返回两个模块。
     """
+    # Fresh CLI processes must initialize the same Core candidate and adjacent imports before loading recovery.
+    # 全新 CLI 进程须在加载恢复模块前初始化同一 Core candidate 及相邻导入。
+    authority(core_root)
     shared = shared_gate(core_root)
     sys.modules["sdk_prerequisites"] = shared
     path = Path(core_root).resolve() / "scripts/release/sdk_recovery.py"

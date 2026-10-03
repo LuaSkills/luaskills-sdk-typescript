@@ -1325,6 +1325,61 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertEqual(sdk.count("      actions: read"),2)
         self.assertEqual(examples.count("      actions: read"),2)
 
+    def test_recovery_authority_in_fresh_python_and_cli_binding_rejection(self):
+        """Load the real Core recovery API in isolated new Python processes and reject missing/invalid CLI bindings; return nothing.
+        在隔离的新 Python 进程加载真实 Core 恢复 API，并拒绝 CLI 缺失或不合法绑定；无返回值。
+        Each child starts without this suite's candidate modules or import paths; no native, HTTP or signature verification is mocked.
+        每个子进程均无此套件的 candidate 模块及导入路径；不替换原生、HTTP 或签名校验。
+        """
+        # Program arguments select exactly this SDK control and the existing explicit Core checkout.
+        # Program 参数精确选择本 SDK 控制代码及既有明确 Core 检出。
+        program = ("import importlib.util,json,sys\n"
+                   "# Load only the SDK file supplied as argv[1]; argv[2] is its sole Core root.\n"
+                   "# 仅加载 argv[1] 指定 SDK 文件；argv[2] 为其唯一 Core 根。\n"
+                   "spec=importlib.util.spec_from_file_location('sdk_release',sys.argv[1])\n"
+                   "# Module executes the actual control source without test-suite initialization.\n"
+                   "# Module 执行实际控制源码，不继承测试套件初始化。\n"
+                   "module=importlib.util.module_from_spec(spec)\n"
+                   "spec.loader.exec_module(module)\n"
+                   "# Recovery and shared must initialize their adjacent candidate from this exact root.\n"
+                   "# Recovery 和 shared 必须从此精确根初始化相邻 candidate。\n"
+                   "recovery,shared=module.recovery_authority(sys.argv[2])\n"
+                   "print(json.dumps({'recovery':recovery.__file__,'shared':shared.__file__,"
+                   "'candidate':shared.candidate.__file__,'binding':recovery.BINDING_FILENAME}))\n")
+        # Isolated mode prevents inherited PYTHONPATH, cwd or earlier unit modules from hiding missing initialization.
+        # 隔离模式阻止继承 PYTHONPATH、cwd 或先前单测模块掩盖缺少初始化。
+        command = [RELEASE.sys.executable, "-I", "-B", "-c", program,
+                   str(ROOT / "scripts/release/sdk_release.py"), str(Path(OPTIONS.core_root).resolve())]
+        # Actual child output identifies all three imported authority files, not a synthetic module result.
+        # 实际子进程输出标识三份导入权威文件，绝不是合成模块结果。
+        completed = RELEASE.subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        # Loaded paths must belong to the one declared Core directory.
+        # Loaded 路径必须属于唯一声明 Core 目录。
+        loaded = json.loads(completed.stdout)
+        for field, filename in (("recovery", "sdk_recovery.py"), ("shared", "sdk_prerequisites.py"), ("candidate", "candidate.py")):
+            self.assertEqual(Path(loaded[field]).resolve(), Path(OPTIONS.core_root).resolve() / "scripts/release" / filename)
+        self.assertEqual(loaded["binding"], RECOVERY.BINDING_FILENAME)
+        # Each case reaches the actual fresh candidate-seal CLI and must still reject incomplete evidence before HTTP/signatures.
+        # 每个场景进入实际全新 candidate-seal CLI，仍须在 HTTP 或签名前拒绝不完整证明。
+        for name, content, error in (("missing", None, "FileNotFoundError"), ("non-object", b"[]", "Expected JSON object"),
+                                     ("missing-identity", b"{}", "KeyError: 'repository'")):
+            with self.subTest(binding=name):
+                # Directory is an independent rejected-input fixture; no original candidate bytes are edited.
+                # Directory 为独立拒绝输入夹具，不编辑任何原候选字节。
+                directory = self.root / ("fresh-seal-" + name)
+                directory.mkdir()
+                if content is not None:
+                    (directory / RECOVERY.BINDING_FILENAME).write_bytes(content)
+                # CLI uses the original operation and options without any bypass or synthetic successful seal.
+                # CLI 使用原操作及选项，没有绕过或合成成功封印。
+                result = RELEASE.subprocess.run([RELEASE.sys.executable, "-I", "-B", str(ROOT / "scripts/release/sdk_release.py"),
+                    "candidate-seal", "--core-root", str(Path(OPTIONS.core_root).resolve()), "--input", str(directory)],
+                    capture_output=True, text=True, encoding="utf-8", timeout=30)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("ModuleNotFoundError", result.stderr)
+                self.assertIn(error, result.stderr)
+
     @unittest.skipUnless("SDK_RELEASE_TEST_CORE_PROOF" in os.environ, "Explicit original complete Core proof required")
     def test_workflow_output_uses_binding_after_pretty_core_stdout(self):
         """Execute the real workflow consumer after original Core JSON and an actual unit candidate binding; return nothing.
