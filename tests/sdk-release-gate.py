@@ -454,8 +454,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ["gh", "release", "edit", "v0.5.7", "--repo", "test/repo", "--draft=false"]])
 
     def test_create_and_resume_draft_use_authenticated_list_ids(self):
-        """Model the real API where pending drafts are absent from the published-by-tag endpoint.
-        模拟真实 API：待发布草稿不在已公开按标签接口中出现。
+        """Use the actual creation ID while the authenticated list remains unchanged; reuse only an existing listed draft.
+        在认证列表仍未变化时使用实际创建 ID；仅复用列表中已存在的草稿。
         """
         for existing in (False, True):
             with self.subTest(existing_draft=existing):
@@ -477,7 +477,7 @@ class ReleaseGateTests(unittest.TestCase):
                             raise RELEASE.urllib.error.HTTPError("https://api.github.com/repos/test/repo/git/ref/tags/v0.5.7", 404, "pending tag", {}, None)
                         return {"ref": "refs/tags/v0.5.7", "object": {"type": "commit", "sha": "a" * 40}}
                     if path == "releases?per_page=100&page=1":
-                        return [draft] if state["created"] else []
+                        return [draft] if existing else []
                     if path == "releases?per_page=100&page=2":
                         return []
                     if path == "releases/7/assets?per_page=100&page=1":
@@ -488,8 +488,8 @@ class ReleaseGateTests(unittest.TestCase):
                         self.assertTrue(state["uploaded"])
                         return self.archive.read_bytes()
                     if path == "releases/7":
-                        self.assertTrue(state["published"])
-                        return published
+                        self.assertTrue(state["created"])
+                        return published if state["published"] else draft
                     raise AssertionError("Unexpected draft API route: " + path)
 
                 def command(arguments):
@@ -514,11 +514,98 @@ class ReleaseGateTests(unittest.TestCase):
                         raise AssertionError("Unexpected draft command")
                     return ""
 
-                with patch.object(RELEASE, "github_request", side_effect=reader), patch.object(RELEASE, "run", side_effect=command):
+                def create(repository, tag, commit, title, notes_path):
+                    """Return the explicit created ID without making it appear in the offline release list.
+                    返回明确创建 ID，不使其出现在离线发布列表中。
+                    repository/tag/commit/title are the exact requested owner/name, tag, source and title; notes_path owns notes bytes.
+                    repository／tag／commit／title 是精确请求的仓库、标签、源码和标题；notes_path 拥有说明字节。
+                    Return the explicit draft record after recording one unit-only creation.
+                    记录一次仅限单测创建后返回明确草稿记录。
+                    """
+                    self.assertEqual((repository, tag, commit, title, notes_path), ("test/repo", "v0.5.7", "a" * 40, "title", notes))
+                    self.assertFalse(state["created"])
+                    calls.append(["REST", "release", "create"])
+                    state["created"] = True
+                    return draft
+
+                with patch.object(RELEASE, "github_request", side_effect=reader), patch.object(RELEASE, "run", side_effect=command), patch.object(RELEASE, "create_draft", side_effect=create):
                     RELEASE.immutable_upload("test/repo", "v0.5.7", "a" * 40, [self.archive], "title", notes)
                 expected = ["upload", "edit"] if existing else ["create", "upload", "edit"]
                 self.assertEqual([call[2] for call in calls], expected)
                 self.assertTrue(state["published"])
+
+    def test_create_draft_http201_id_and_independent_readback_guards(self):
+        """Exercise the real Request/opener boundary offline; exact 201 IDs and source/state must bind both responses.
+        离线验证真实 Request／opener 边界；精确 201 ID 与来源／状态必须绑定两个响应。
+        self owns the isolated fixture paths and assertions; return nothing and make no real network request.
+        self 拥有隔离夹具路径及断言；无返回值，也不发出真实网络请求。
+        """
+        # notes owns the exact local UTF-8 notes fixture, never a claim of real GitHub authorization.
+        # notes 拥有精确本地 UTF-8 说明夹具，绝不声称真实 GitHub 授权。
+        notes = self.root / "created-notes.md"
+        notes.write_bytes(b"exact notes\n")
+        # url is the sole offline repository release creation endpoint expected by the actual Request.
+        # url 是实际 Request 预期的唯一离线仓库发布创建端点。
+        url = "https://api.github.com/repos/test/repo/releases"
+        # original is the independent valid response baseline for both creation and exact-ID readback.
+        # original 是创建及精确 ID 回读两者独立有效响应基线。
+        original = {"id": 7, "url": url + "/7", "tag_name": "v0.5.7", "target_commitish": "a" * 40,
+                    "name": "title", "body": "exact notes\n", "draft": True, "prerelease": False, "assets": []}
+        # cases enumerates the valid request and each independently corrupted HTTP/identity/readback fact.
+        # cases 列举有效请求及各独立损坏的 HTTP／身份／回读事实。
+        cases = ("valid", "status", "boolean-id", "zero-id", "foreign-url", "redirect", "source", "tag", "readback-id", "readback-url", "readback-source", "readback-tag", "readback-assets", "unknown-readback")
+        # case selects one mutation; opener captures the real POST boundary and reader isolates exact-ID GET.
+        # case 选取一个变异；opener 捕获实际 POST 边界，reader 隔离精确 ID GET。
+        for case in cases:
+            with self.subTest(case=case), patch.dict(os.environ, {"GH_TOKEN": "unit-only-current-token"}), patch.object(RELEASE.urllib.request, "build_opener") as opener, patch.object(RELEASE, "github_request") as reader:
+                # created is the mutable POST record; observed is the independent GET record for this mutation.
+                # created 是可变 POST 记录；observed 是本变异的独立 GET 记录。
+                created, observed = copy.deepcopy(original), copy.deepcopy(original)
+                # response is the context-managed offline HTTP response returned by the single captured POST.
+                # response 是单次捕获 POST 返回的上下文管理离线 HTTP 响应。
+                response = opener.return_value.open.return_value.__enter__.return_value
+                response.status = 200 if case == "status" else 201
+                response.geturl.return_value = url + "/other" if case == "redirect" else url
+                if case == "boolean-id":
+                    created["id"] = True
+                elif case == "zero-id":
+                    created["id"] = 0
+                elif case == "foreign-url":
+                    created["url"] = "https://api.github.com/repos/other/repo/releases/7"
+                elif case == "source":
+                    created["target_commitish"] = "b" * 40
+                elif case == "tag":
+                    created["tag_name"] = "v9.9.9"
+                elif case == "readback-id":
+                    observed["id"] = 8
+                elif case == "readback-url":
+                    observed["url"] = "https://api.github.com/repos/other/repo/releases/7"
+                elif case == "readback-source":
+                    observed["target_commitish"] = "b" * 40
+                elif case == "readback-tag":
+                    observed["tag_name"] = "v9.9.9"
+                elif case == "readback-assets":
+                    observed["assets"] = [{"name": "unexpected"}]
+                response.read.return_value = json.dumps(created).encode("utf-8")
+                reader.return_value = observed
+                if case == "unknown-readback":
+                    reader.side_effect = RELEASE.urllib.error.HTTPError(url + "/7", 403, "unknown readback", {}, None)
+                    self.addCleanup(reader.side_effect.close)
+                if case == "valid":
+                    self.assertEqual(RELEASE.create_draft("test/repo", "v0.5.7", "a" * 40, "title", notes), original)
+                    reader.assert_called_once_with("test/repo", "releases/7")
+                else:
+                    with self.assertRaises((ValueError, RELEASE.urllib.error.HTTPError)):
+                        RELEASE.create_draft("test/repo", "v0.5.7", "a" * 40, "title", notes)
+                self.assertEqual(opener.return_value.open.call_count, 1)
+                # request is the actual urllib Request, whose endpoint, method, credential and exact body are asserted.
+                # request 是实际 urllib Request，其端点、方法、凭据和精确正文均受断言检查。
+                request = opener.return_value.open.call_args.args[0]
+                self.assertEqual(request.get_method(), "POST")
+                self.assertEqual(request.full_url, url)
+                self.assertEqual(request.get_header("Authorization"), "Bearer unit-only-current-token")
+                self.assertEqual(json.loads(request.data), {"tag_name": "v0.5.7", "target_commitish": "a" * 40,
+                                 "name": "title", "body": "exact notes\n", "draft": True, "prerelease": False})
 
     def test_wrong_actual_tag_prevents_every_sdk_and_example_release_mutation(self):
         """Reject a wrong recursive real tag despite a matching draft target, before upload/create/edit.
@@ -599,6 +686,11 @@ class ReleaseGateTests(unittest.TestCase):
                 patch.object(RELEASE, "publication_preflight", wraps=preflight), \
                 patch.object(RELEASE, "registry_package") as registry, \
                 patch.object(RELEASE, "npm_publish_archive") as npm:
+            # tag is the current real package's release tag, independently of the transport's historical fixture.
+            # tag 是当前真实包的发布标签，独立于传输的历史夹具。
+            tag = "v" + self.identity["sdk_version"]
+            state.routes[state.base + "/git/ref/tags/" + tag] = {"ref": "refs/tags/" + tag,
+                "object": {"type": "commit", "sha": state.source}}
             state.status = 403
             with self.assertRaises(RELEASE.urllib.error.HTTPError) as rejection:
                 RELEASE.publish_or_verify(arguments)
@@ -1052,7 +1144,9 @@ class ReleaseGateTests(unittest.TestCase):
         with self.recovery_context():
             RELEASE.candidate_fetch(self.fetch_args())
         self.add_attempt(456, 3, [RELEASE.workflow_job_name(RELEASE.SDK_WORKFLOW,"publish")], conclusion="success", mode="recover")
-        self.release_files = {11: files}
+        # Each name/body maps an original filename to its exact bytes; only nonempty bytes enter the remote fixture.
+        # 各 name／body 将原文件名映射到精确字节；仅非空字节进入远端夹具。
+        self.release_files = {11: {name: body for name, body in files.items() if body}}
         self.releases = {11: {"id":11,"tag_name":"v" + self.identity["sdk_version"],"draft":False,"prerelease":False,"immutable":False}}
         root = self.root / "restored"
         consumer = self.root / "fresh-consumer.json"
@@ -1107,6 +1201,189 @@ class ReleaseGateTests(unittest.TestCase):
         return SimpleNamespace(core_root=OPTIONS.core_root,repository="test/repo",sdk_source_sha=self.identity["sdk_source_sha"],sdk_version=self.identity["sdk_version"],
             candidate_run_id="123",candidate_run_attempt="2",completion_run_id="456",completion_run_attempt="3",
             completion_source_sha=self.identity["sdk_source_sha"],output=self.root/"formal")
+
+    def test_main_release_retains_signed_empty_logs_without_empty_attachments(self):
+        """Verify a nonempty physical GA while preserving every signed logical member in the candidate.
+        验证非空物理 GA，同时在候选中保留每个签名逻辑成员。
+        self owns the isolated original candidate and remote fixture; return nothing or fail an assertion.
+        self 拥有隔离原候选及远端夹具；无返回值或使断言失败。
+        """
+        # files owns complete original subject bytes; the unused first result is discarded, not a fallback source.
+        # files 拥有完整原主体字节；不使用的首项结果被丢弃，并非回退来源。
+        _, files = self.original_candidate_fixture()
+        # Each name/body maps the original filename/bytes; only the remote physical fixture excludes empty members.
+        # 各 name／body 映射原文件名／字节；仅远端物理夹具排除空成员。
+        self.release_files = {11: {name: body for name, body in files.items() if body}}
+        self.releases = {11: {"id": 11, "tag_name": "v" + self.identity["sdk_version"], "draft": False, "prerelease": False}}
+        with self.recovery_context(), patch.object(RELEASE, "github_request", side_effect=self.recovery_reader):
+            RELEASE.candidate_fetch(self.fetch_args())
+            # state is the actually verified local candidate that still owns every signed logical member.
+            # state 是实际验证的本地候选，仍拥有每个签名逻辑成员。
+            state = RELEASE.local_candidate(SimpleNamespace(core_root=OPTIONS.core_root, repository="test/repo", candidate=self.root / "restored"))
+            RELEASE.main_release_matches("test/repo", state, 11)
+        # Assertion path/body identify each actual restored path and each original byte string, including empty logs.
+        # 断言 path／body 标识各实际恢复路径及各原字节串，包含空日志。
+        self.assertEqual({path.name: path.read_bytes() for path in (state["root"] / "original").iterdir()}, files)
+        self.assertTrue(any(not body for body in files.values()))
+
+    def test_publish_candidate_passes_only_authenticated_nonempty_files(self):
+        """Authenticate the complete real fixture before passing only nonempty original paths to the generic uploader.
+        在只向通用上传者传入非空原路径前认证完整实际夹具。
+        self owns the isolated recovery candidate and consumer record; return nothing or fail an assertion.
+        self 拥有隔离恢复候选及消费记录；无返回值或使断言失败。
+        """
+        # The existing recovery fixture supplies the original candidate and current completion authority.
+        # 既有恢复夹具提供原候选及当前完成权威。
+        self.completion_fixture()
+        # original maps each path's actual filename to bytes before publication can select physical assets.
+        # original 在发布选取物理资产前将各 path 的实际文件名映射到字节。
+        original = {path.name: path.read_bytes() for path in (self.root / "restored/original").iterdir()}
+        # consumer is the explicit unit-only successful fresh-consumption record path required by publication.
+        # consumer 是发布要求的明确仅限单测成功新消费记录路径。
+        consumer = self.root / "publish-consumer.json"
+        RELEASE.write_json(consumer, {"artifact": self.identity, "success": True, "cache": "new-empty-cache"})
+        # args binds exact original candidate, recovery intent, prerequisites and isolated output for this entry.
+        # args 为该入口绑定精确原候选、恢复意图、前置证明及隔离输出。
+        args = SimpleNamespace(core_root=OPTIONS.core_root, candidate=self.root / "restored", repository="test/repo",
+            intent="recover", consumer=consumer, prerequisites=self.prerequisites, output=self.root / "published.json")
+        # upload captures only the generic uploader's supplied paths without any actual publication.
+        # upload 仅捕获传给通用上传者的路径，不执行任何实际发布。
+        with self.recovery_context(), patch.object(RELEASE, "github_request", side_effect=self.recovery_reader), \
+             patch.dict(os.environ, self.recovery_environment(456, 3, "recover")), \
+             patch.object(RELEASE, "immutable_upload", return_value=self.releases[11]) as upload:
+            RELEASE.publish_candidate(args)
+        # Comprehension path/name/body are respectively the supplied path, original filename and original bytes.
+        # 推导式 path／name／body 分别是传入路径、原文件名和原字节。
+        self.assertEqual({path.name for path in upload.call_args.args[3]}, {name for name, body in original.items() if len(body) > 0})
+        self.assertTrue(all(path.read_bytes() for path in upload.call_args.args[3]))
+        self.assertEqual({path.name: path.read_bytes() for path in (self.root / "restored/original").iterdir()}, original)
+
+    def test_formal_proof_restores_original_empty_members_from_signed_bundle(self):
+        """Read the complete signed logical inventory from a GA with no empty attachments before acceptance.
+        在接受前从没有空附件的 GA 读取完整签名逻辑库存。
+        self owns the isolated original bundle and formal output; return nothing or fail an assertion.
+        self 拥有隔离原 bundle 及正式输出；无返回值或使断言失败。
+        """
+        self.completion_fixture()
+        # original maps each original path's name to its bytes independently of the later consumer reconstruction.
+        # original 独立于后续消费恢复，将各原 path 的名称映射到其字节。
+        original = {path.name: path.read_bytes() for path in (self.root / "restored/original").iterdir()}
+        # Each name/body retains the original filename/bytes while the remote fixture exposes only nonempty members.
+        # 各 name／body 保留原文件名／字节，远端夹具仅暴露非空成员。
+        self.release_files[11] = {name: body for name, body in original.items() if body}
+        # args selects the exact original candidate/completion identities and isolated accepted output path.
+        # args 选取精确原候选／完成身份及隔离接受输出路径。
+        args = self.formal_args()
+
+        def consume(options):
+            """Emit explicit unit-only consumer evidence; options owns its exact output path; return nothing.
+            生成明确仅限单测消费证据；options 拥有精确输出路径；无返回值。
+            """
+            RELEASE.write_json(options.output, {"unit_only": True, "artifact": self.identity, "success": True, "cache": "new-empty-cache"})
+
+        with self.recovery_context(), patch.object(RELEASE, "github_request", side_effect=self.recovery_reader), patch.object(RELEASE, "registry_consumer", side_effect=consume):
+            RELEASE.formal_proof(args)
+        # Assertion path is each actual restored original member whose bytes must equal the untouched baseline.
+        # 断言 path 是各实际恢复原成员，其字节必须等于未变基线。
+        self.assertEqual({path.name: path.read_bytes() for path in (args.output / "candidate/original").iterdir()}, original)
+        self.assertTrue((args.output / "accepted.json").is_file())
+
+    def test_formal_physical_assets_and_empty_bundle_members_fail_closed(self):
+        """Reject missing/extra physical files and authenticated size/digest/member inconsistencies before consuming npm.
+        在消费 npm 前拒绝缺失／多余物理文件及认证大小／摘要／成员不一致。
+        self owns the isolated signed-fixture inputs and rejected outputs; return nothing or fail an assertion.
+        self 拥有隔离签名夹具输入及拒绝输出；无返回值或使断言失败。
+        """
+        self.completion_fixture()
+        # original is the independent baseline remote asset map, retaining each member's original bytes.
+        # original 是独立基线远端资产映射，保留各成员原字节。
+        original = copy.deepcopy(self.release_files)
+        # signatures is the independent baseline of clearly synthetic official-verifier fixtures.
+        # signatures 是明确合成官方验证器夹具的独立基线。
+        signatures = copy.deepcopy(self.signatures)
+        # zero_name is the existing fixture's exact signed zero-byte subject, never a production suffix guess.
+        # zero_name 是既有夹具精确签名零字节主体，绝不是生产后缀猜测。
+        zero_name = "native-linux-arm64.stderr.log"
+        # cases enumerates each physical inventory or authenticated archive-member inconsistency separately.
+        # cases 分别列举各物理库存或认证归档成员不一致。
+        cases = ("missing-physical", "extra-physical", "empty-physical", "bundle-digest", "zero-digest", "zero-size", "missing-member", "changed-member", "extra-member")
+        # case selects one isolated mutation after all original fixture observations are restored.
+        # case 在全部原夹具观察恢复后选取一个隔离变异。
+        for case in cases:
+            with self.subTest(case=case):
+                self.release_files = copy.deepcopy(original)
+                self.signatures = copy.deepcopy(signatures)
+                # files is this case's mutable physical main-release map, not the immutable baseline.
+                # files 是本案例可变物理主发布映射，而非不可变基线。
+                files = self.release_files[11]
+                if case == "missing-physical":
+                    del files[self.archive.name]
+                elif case == "extra-physical":
+                    files["unexpected.txt"] = b"unexpected"
+                elif case == "empty-physical":
+                    files[zero_name] = b""
+                elif case == "bundle-digest":
+                    files[RELEASE.CANDIDATE_BUNDLE] += b"changed bundle"
+                else:
+                    # binding is the parsed signed inventory fixture being deliberately made inconsistent.
+                    # binding 是被刻意改成不一致的解析签名清单夹具。
+                    binding = json.loads(files[RECOVERY.BINDING_FILENAME])
+                    # marker selects the exact unit-only verifier record that authenticates this mutated fixture.
+                    # marker 选取认证本变异夹具的精确仅限单测验证器记录。
+                    marker = files[RELEASE.CANDIDATE_ATTESTATION].decode("utf-8")
+                    # Generator row is the exact signed inventory entry matched by the known fixture filename.
+                    # 生成式 row 是按已知夹具文件名匹配的精确签名清单条目。
+                    if case == "zero-digest":
+                        next(row for row in binding["inventory"] if row["filename"] == zero_name)["sha256"] = hashlib.sha256(b"changed zero").hexdigest()
+                    elif case == "zero-size":
+                        next(row for row in binding["inventory"] if row["filename"] == zero_name)["size"] = 1
+                        files[zero_name] = b""
+                    else:
+                        # archive owns the actual mutable fixture tar bytes, never a product phase or fallback log.
+                        # archive 拥有实际可变夹具 tar 字节，绝不是产品阶段或回退日志。
+                        archive = self.root / (case + ".tar.gz")
+                        archive.write_bytes(files[RELEASE.CANDIDATE_BUNDLE])
+                        # members maps the actual canonical archive filenames to their bytes before this mutation.
+                        # members 在本变异前将实际规范归档文件名映射到其字节。
+                        members = RELEASE.signed_members(archive)
+                        if case == "missing-member":
+                            del members[zero_name]
+                        elif case == "changed-member":
+                            members[zero_name] = b"changed member"
+                        else:
+                            members["unexpected.txt"] = b"unexpected member"
+                        # stream stores the newly serialized mutated fixture archive in memory.
+                        # stream 在内存中保存新序列化的变异夹具归档。
+                        stream = io.BytesIO()
+                        # tar writes only explicit fixture members into that in-memory gzip stream.
+                        # tar 仅将明确夹具成员写入该内存 gzip 流。
+                        with tarfile.open(fileobj=stream, mode="w:gz") as tar:
+                            # name/body are the current exact member filename and bytes to be written.
+                            # name／body 是当前要写入的精确成员文件名及字节。
+                            for name, body in sorted(members.items()):
+                                # member is the regular tar header whose size is derived from those actual bytes.
+                                # member 是普通 tar 头，其大小从这些实际字节派生。
+                                member = tarfile.TarInfo(name)
+                                member.size = len(body)
+                                tar.addfile(member, io.BytesIO(body))
+                        files[RELEASE.CANDIDATE_BUNDLE] = stream.getvalue()
+                        # row is the single signed bundle entry whose digest/size must track this mutated archive.
+                        # row 是唯一签名 bundle 条目，其摘要／大小必须跟随本变异归档。
+                        row = next(row for row in binding["inventory"] if row["filename"] == RELEASE.CANDIDATE_BUNDLE)
+                        row.update(size=len(files[RELEASE.CANDIDATE_BUNDLE]), sha256=hashlib.sha256(files[RELEASE.CANDIDATE_BUNDLE]).hexdigest())
+                        self.signatures[marker]["files"][RELEASE.CANDIDATE_BUNDLE] = files[RELEASE.CANDIDATE_BUNDLE]
+                    files[RECOVERY.BINDING_FILENAME] = json.dumps(binding).encode("utf-8")
+                    self.signatures[marker]["files"][RECOVERY.BINDING_FILENAME] = files[RECOVERY.BINDING_FILENAME]
+                # args keeps the original formal identities while selecting a unique rejected output for this case.
+                # args 保留原正式身份，同时为本案例选取唯一拒绝输出。
+                args = self.formal_args()
+                args.output = self.root / ("formal-rejected-" + case)
+                # consume records any attempted npm consumer call so rejection must precede all consumption.
+                # consume 记录任何尝试的 npm 消费调用，确保拒绝先于全部消费。
+                with self.recovery_context(), patch.object(RELEASE, "github_request", side_effect=self.recovery_reader), patch.object(RELEASE, "registry_consumer") as consume, self.assertRaises(ValueError):
+                    RELEASE.formal_proof(args)
+                consume.assert_not_called()
+                self.assertFalse((args.output / "accepted.json").exists())
 
     def test_dual_formal_proof_preserves_original_failure_and_requires_fresh_consumer(self):
         """Authenticate both permanent chains and emit the explicit accepted header only after a new consumer file exists.

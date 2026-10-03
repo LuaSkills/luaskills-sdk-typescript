@@ -916,6 +916,71 @@ def publication_preflight(args):
                            "repository": args.repository, "default_branch": repository["default_branch"], "contents_write": contents_write})
 
 
+def create_draft(repository, tag, commit, title, notes):
+    """Create repository/tag's empty draft once from commit/title/notes; return its independently read exact ID.
+    根据 commit／title／notes 仅创建一次 repository／tag 空草稿；返回独立回读的精确 ID 对象。
+    repository is owner/name; tag is the exact release tag; commit is the frozen SDK source SHA.
+    repository 为所有者／仓库名；tag 为精确发布标签；commit 为冻结 SDK 源码 SHA。
+    title is the requested release name; notes is the UTF-8 notes file path; return the validated GET release record.
+    title 为请求的发布标题；notes 为 UTF-8 说明文件路径；返回已验证的 GET 发布记录。
+    """
+    require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository), "Invalid GitHub repository")
+    require(bool(os.environ.get("GH_TOKEN")), "Current GH_TOKEN is required for draft creation")
+    # url is the sole repository creation endpoint; creation has no retry or list-based ID discovery.
+    # url 是唯一仓库创建端点；创建不重试，也不从列表发现 ID。
+    url = f"https://api.github.com/repos/{repository}/releases"
+    # headers bind the original API version, JSON media and current credential to that endpoint.
+    # headers 将原 API 版本、JSON 媒体及当前凭据绑定到该端点。
+    headers = {"Accept": "application/vnd.github+json", "Content-Type": "application/json",
+               "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "luaskills-sdk-release",
+               "Cache-Control": "no-cache", "Authorization": "Bearer " + os.environ["GH_TOKEN"]}
+    # body is the exact notes file decoded as UTF-8 without newline conversion.
+    # body 是精确说明文件按 UTF-8 解码的内容，不转换换行。
+    body = Path(notes).read_bytes().decode("utf-8")
+    # payload encodes only the exact requested source, tag, title, notes and empty draft state.
+    # payload 仅编码精确请求的源码、标签、标题、说明及空草稿状态。
+    payload = json.dumps({"tag_name": tag, "target_commitish": commit, "name": title, "body": body,
+                          "draft": True, "prerelease": False}).encode("utf-8")
+    # request carries that payload once to the sole authorized POST URL.
+    # request 将该正文一次发送到唯一授权 POST URL。
+    request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    # response is the actual creation HTTP response, whose status and original URL must both match.
+    # response 是实际创建 HTTP 响应，其状态及原 URL 必须同时匹配。
+    with urllib.request.build_opener(SafeRedirect()).open(request, timeout=60) as response:
+        require(response.status == 201 and response.geturl() == url, "Draft creation requires HTTP 201 from the original repository URL")
+        # content retains the bounded original response bytes before strict duplicate-key JSON parsing.
+        # content 在严格重复键 JSON 解析前保留有界原响应字节。
+        content = response.read(MAX_RELEASE_ASSET_BYTES)
+        require(len(content) < MAX_RELEASE_ASSET_BYTES, "Draft response exceeds the GitHub asset size limit")
+    # created is the actual 201 JSON record; only its valid ID owns readback, never another draft or retry.
+    # created 是实际 201 JSON 记录；仅其有效 ID 拥有回读，绝不选择其他草稿或重试。
+    created = json.loads(content, object_pairs_hook=pairs)
+    require(type(created["id"]) is int and created["id"] > 0 and created["url"] == url + "/" + str(created["id"]), "Invalid actual created draft ID/URL")
+    # release is the independent GET record for the sole ID returned by the creation request.
+    # release 是创建请求返回唯一 ID 的独立 GET 记录。
+    release = github_request(repository, "releases/" + str(created["id"]))
+    # record selects each observed POST/GET object for the same exact request invariants.
+    # record 依次选取观察到的 POST／GET 对象，以检查同一精确请求不变量。
+    for record in (created, release):
+        require(type(record["id"]) is int and record["id"] == created["id"] and record["url"] == created["url"]
+                and record["tag_name"] == tag and record["target_commitish"] == commit
+                and record["draft"] is True and record["prerelease"] is False and record["assets"] == []
+                and record["name"] == title and record["body"] == body, "Created draft source/tag/state/notes differ from the exact request")
+    return release
+
+
+def candidate_physical_names(sizes):
+    """Project verified filename-to-size entries onto nonempty GitHub assets; return their unique names.
+    将已验证文件名到大小的条目投影为非空 GitHub 资产；返回唯一名称集合。
+    sizes maps verified logical names to byte counts; size is each count and name is its canonical filename.
+    sizes 将已验证逻辑名称映射到字节数；size 是各字节数，name 是其规范文件名。
+    """
+    require(type(sizes) is dict and all(type(size) is int and size >= 0 for size in sizes.values()), "Invalid candidate physical inventory sizes")
+    # Empty logical subjects remain signed inside the original bundle; this is the sole physical projection rule.
+    # 空逻辑主体仍在原 bundle 内保留签名；这里是唯一物理投影规则。
+    return {name for name, size in sizes.items() if size > 0}
+
+
 def immutable_upload(repository, tag, commit, files, title, notes):
     """Check all existing bytes, upload only to drafts, then publish the complete release.
     检查全部已有字节，仅向草稿上传，然后发布完整 Release。
@@ -926,10 +991,7 @@ def immutable_upload(repository, tag, commit, files, title, notes):
             resolve_sdk_tag(repository, tag, commit)
         except SDKTagMissing:
             pass
-        run(["gh", "release", "create", tag, "--draft", "--repo", repository, "--target", commit,
-             "--title", title, "--notes-file", notes])
-        release = release_by_tag(repository, tag)
-        require(release is not None and release["draft"] is True, "Created draft was not found by authenticated release ID")
+        release = create_draft(repository, tag, commit, title, notes)
     require(release["prerelease"] is False and type(release["draft"]) is bool, "Release state must be explicit")
     if release["draft"]:
         require(release["tag_name"] == tag and release["target_commitish"] == commit, "Draft source must be the exact SDK commit")
@@ -1271,8 +1333,14 @@ def publish_candidate(args):
     notes = state["root"] / "candidate-release-notes.md"
     notes.write_text("Original tested SDK candidate assets; completion is recorded by a separate signed recovery release.\n"
         "原始已测 SDK 候选资产；完成状态由独立签名恢复发布记录。\n", encoding="utf-8", newline="\n")
+    # original maps each authenticated logical filename to its original path; path/name retain that exact ownership.
+    # original 将每个认证逻辑文件名映射到原路径；path／name 保留该精确归属。
+    original = {path.name: path for path in (state["root"] / "original").iterdir()}
+    # physical contains only nonempty original names; the generic uploader never drops supplied files.
+    # physical 仅包含非空原名称；通用上传者绝不丢弃传入文件。
+    physical = candidate_physical_names({name: len(path.read_bytes()) for name, path in original.items()})
     release = immutable_upload(args.repository, "v" + state["identity"]["sdk_version"], state["identity"]["sdk_source_sha"],
-        sorted((state["root"] / "original").iterdir()), "LuaSkills SDK " + state["identity"]["sdk_version"], notes)
+        [original[name] for name in sorted(physical)], "LuaSkills SDK " + state["identity"]["sdk_version"], notes)
     write_json(args.output, release)
 
 
@@ -1286,8 +1354,8 @@ def completion_tag(version, run_id, attempt):
 
 
 def main_release_matches(repository, state, release_id):
-    """Read actual main release by ID and require every original candidate asset byte and real tag source.
-    按 ID 读取实际主 Release，要求全部原候选资产字节及真实标签源码匹配。
+    """Read main release by ID and require every nonempty original candidate asset byte and real tag source.
+    按 ID 读取主 Release，要求每个非空原候选资产字节及真实标签源码匹配。
     """
     release = github_request(repository, "releases/" + str(release_id))
     identity = state["identity"]
@@ -1295,11 +1363,16 @@ def main_release_matches(repository, state, release_id):
         and release["prerelease"] is False and release["tag_name"] == "v" + identity["sdk_version"], "Actual main release identity/state mismatch")
     resolve_sdk_tag(repository, release["tag_name"], identity["sdk_source_sha"])
     expected = {path.name: path.read_bytes() for path in (state["root"] / "original").iterdir() if path.is_file()}
+    # physical selects nonempty expected names; each comprehension name/body is its original filename/bytes.
+    # physical 选取非空预期名称；推导式各 name／body 是其原文件名／字节。
+    physical = candidate_physical_names({name: len(body) for name, body in expected.items()})
     assets = release_assets(repository, release_id)
-    require(set(assets) == set(expected), "Main release must contain exactly the original candidate assets")
-    for name, body in expected.items():
+    require(set(assets) == physical, "Main release must contain exactly the nonempty original candidate assets")
+    # name is the exact physical member currently being compared against its complete local logical evidence.
+    # name 是当前与完整本地逻辑证据比较的精确物理成员名。
+    for name in sorted(physical):
         current = github_request(repository, "releases/assets/" + str(assets[name]["id"]), binary=True)
-        require(current == body, "Main release changed original candidate bytes: " + name)
+        require(current == expected[name], "Main release changed original candidate bytes: " + name)
     return release
 
 
@@ -1461,9 +1534,42 @@ def formal_proof(args):
         repository=args.repository, workflow_path=SDK_WORKFLOW, source_sha=args.sdk_source_sha, run_id=int(args.candidate_run_id),
         run_attempt=int(args.candidate_run_attempt), artifact_name=recovery.candidate_artifact_name(int(args.candidate_run_id), int(args.candidate_run_attempt)))
     files = {path.name: path.read_bytes() for path in bootstrap.iterdir()}
-    for row in recovery.validate_inventory(binding["binding"]["inventory"]):
-        files[row["filename"]] = release_file(args.repository, candidate_assets, row["filename"])
-    require(set(candidate_assets) == set(files), "Main release contains unexpected candidate assets")
+    # inventory is the canonical authenticated logical list; absent or extra attachments never choose a fallback source.
+    # inventory 是规范认证逻辑清单；缺失或多余附件绝不选择回退来源。
+    inventory = recovery.validate_inventory(binding["binding"]["inventory"])
+    # physical derives nonempty names only from each signed row's exact filename and byte count.
+    # physical 仅从各签名 row 的精确文件名及字节数派生非空名称。
+    physical = candidate_physical_names({row["filename"]: row["size"] for row in inventory})
+    require(set(candidate_assets) == physical | set(files), "Main release contains unexpected or missing physical candidate assets")
+    # row is the current signed logical inventory entry used to authenticate a physical download.
+    # row 是用于认证物理下载的当前签名逻辑库存条目。
+    for row in inventory:
+        if row["filename"] in physical:
+            # body is the actual downloaded member, verified before it joins the complete logical files.
+            # body 是实际下载成员，加入完整逻辑 files 前须经验证。
+            body = release_file(args.repository, candidate_assets, row["filename"])
+            require(len(body) == row["size"] and hashlib.sha256(body).hexdigest() == row["sha256"], "Physical candidate asset differs from signed size/digest: " + row["filename"])
+            files[row["filename"]] = body
+    # Authenticate the bundle's original size/digest before parsing; empty bytes must come from actual regular members.
+    # 解析前认证 bundle 原大小／摘要；空字节必须来自实际普通成员。
+    require(CANDIDATE_BUNDLE in physical, "Signed nonempty candidate bundle is required")
+    # bundle is the bootstrap path for the original already size/digest-verified archive bytes.
+    # bundle 是原已验证大小／摘要的归档字节在引导目录中的路径。
+    bundle = bootstrap / CANDIDATE_BUNDLE
+    bundle.write_bytes(files[CANDIDATE_BUNDLE])
+    # members maps each actual canonical regular tar member to its original bytes, including empty members.
+    # members 将各实际规范普通 tar 成员映射到原字节，包含空成员。
+    members = signed_members(bundle)
+    # row is the exact signed logical entry whose zero size requires recovery from the authenticated archive.
+    # row 是精确签名逻辑条目，其零大小要求从认证归档恢复。
+    for row in inventory:
+        if row["filename"] not in physical:
+            require(row["filename"] in members, "Original empty candidate member is missing from signed bundle: " + row["filename"])
+            # body is the actual named archive member, never synthesized empty bytes or a guessed log suffix.
+            # body 是实际命名归档成员，绝不合成空字节或猜测日志后缀。
+            body = members[row["filename"]]
+            require(len(body) == row["size"] and hashlib.sha256(body).hexdigest() == row["sha256"], "Original empty candidate member differs from signed size/digest: " + row["filename"])
+            files[row["filename"]] = body
     candidate_directory = output / "candidate"
     candidate_directory.mkdir()
     state = verify_candidate_files(args, files, original_attempt, candidate_directory / "original")
