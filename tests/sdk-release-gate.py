@@ -69,6 +69,169 @@ class RecoveryHttp:
         return self.responses[url], {}
 
 
+
+class TimeoutDiagnosticsTests(unittest.TestCase):
+    """Verify binary partial output and silent timeouts with real subprocess exceptions.
+    使用真实子进程异常核验二进制部分输出及无输出超时。
+    """
+
+    def test_real_timeout_preserves_binary_partial_output_and_none(self):
+        """Require original timeout identity, exact partial bytes and None handling; return nothing.
+        要求原超时身份、精确部分字节及 None 处理；无返回值。
+        """
+        # Retain the true subprocess function; the wrapper changes only its timeout budget.
+        # 保留真实子进程函数；包装器仅改变超时预算。
+        original_run = RELEASE.subprocess.run
+        # Exercise both observed binary output and the actual no-output exception state.
+        # 覆盖已观察二进制输出及真实无输出异常状态。
+        for silent in (False, True):
+            with self.subTest(silent=silent), tempfile.TemporaryDirectory() as directory:
+                # Own a fresh destination, expected stream bytes and an exception identity trace.
+                # 拥有新目的地、期望输出字节及异常身份轨迹。
+                root = Path(directory)
+                prefix = root / "partial"
+                expected_stdout, expected_stderr = (b"", b"") if silent else (b"OUT\xff\n", b"ERR\xfe\n")
+                observed = []
+                # Capture real terminal bytes without decoding non-UTF8 child output.
+                # 捕获真实终端字节，不解码子进程非 UTF-8 输出。
+                stdout = io.BytesIO()
+                stderr = io.BytesIO()
+                # Use an actual sleeping child; never construct an exception or process result.
+                # 使用真实休眠子进程；绝不构造异常或进程结果。
+                program = "import time; time.sleep(30)" if silent else "import os,time; os.write(1,b'OUT\\xff\\n'); os.write(2,b'ERR\\xfe\\n'); time.sleep(30)"
+                command = [RELEASE.sys.executable, "-I", "-B", "-c", program]
+
+                def shorter_timeout(*arguments, **options):
+                    """Execute real arguments after shortening options' timeout; propagate its same exception.
+                    缩短 options 超时后真实执行 arguments；传播同一异常。
+                    """
+                    options["timeout"] = 1
+                    try:
+                        return original_run(*arguments, **options)
+                    except RELEASE.subprocess.TimeoutExpired as error:
+                        observed.append(error)
+                        raise
+
+                with patch.object(RELEASE.subprocess, "run", side_effect=shorter_timeout), \
+                        patch.object(RELEASE.sys, "stdout", SimpleNamespace(buffer=stdout)), \
+                        patch.object(RELEASE.sys, "stderr", SimpleNamespace(buffer=stderr)):
+                    # Capture the exact exception rethrown by the production boundary.
+                    # 捕获生产边界重抛的精确异常。
+                    with self.assertRaises(RELEASE.subprocess.TimeoutExpired) as caught:
+                        RELEASE.run(command, cwd=root, timeout=120, log_prefix=prefix)
+                self.assertEqual(len(observed), 1)
+                self.assertIs(caught.exception, observed[0])
+                self.assertEqual(caught.exception.timeout, 1)
+                if silent:
+                    self.assertIn(caught.exception.output, (None, b""))
+                    self.assertIn(caught.exception.stderr, (None, b""))
+                else:
+                    self.assertIsInstance(caught.exception.output, bytes)
+                self.assertEqual(stdout.getvalue(), expected_stdout)
+                self.assertEqual(stderr.getvalue(), expected_stderr)
+                # Compare actual optional exception streams with their exclusively saved logs.
+                # 将真实可选异常输出与其独占保存日志对比。
+                for suffix, content in (("stdout.log", caught.exception.output), ("stderr.log", caught.exception.stderr)):
+                    # None has no observed bytes; an observed empty byte stream remains a real empty file.
+                    # None 没有已观察字节；观察到的空字节流仍对应真实空文件。
+                    filename = Path(str(prefix) + "." + suffix)
+                    if content is None:
+                        self.assertFalse(filename.exists())
+                    else:
+                        self.assertEqual(filename.read_bytes(), content)
+
+
+    def test_real_timeout_log_failures_preserve_original_exception_and_evidence(self):
+        """Require real existing-file/parent-file failures to retain partial bytes and original timeout.
+        要求真实已有文件及父路径为文件的失败保留部分字节和原超时。
+        """
+        # The subprocess implementation remains real; the test changes only its timeout budget.
+        # 子进程实现保持真实；测试仅改变其超时预算。
+        original_run = RELEASE.subprocess.run
+        for case in ("existing-logs", "parent-file", "diagnostic-pipe-closed"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                # Own fresh paths, immutable sentinels and an original exception trace.
+                # 拥有新路径、不可变哨兵及原异常轨迹。
+                root = Path(directory)
+                parent = root / "logs"
+                prefix = parent / "native"
+                preserved = {}
+                observed = []
+                stdout = io.BytesIO()
+                stderr = io.BytesIO()
+                if case == "parent-file":
+                    parent.write_bytes(b"owned-parent-sentinel")
+                    preserved[parent] = parent.read_bytes()
+                else:
+                    parent.mkdir()
+                    # Preserve both existing real files, never merely a simulated FileExistsError.
+                    # 保留两个真实已有文件，绝不仅模拟 FileExistsError。
+                    for suffix in ("stdout.log", "stderr.log"):
+                        filename = Path(str(prefix) + "." + suffix)
+                        filename.write_bytes(("owned-" + suffix).encode("ascii"))
+                        preserved[filename] = filename.read_bytes()
+                # A real closed-read pipe supplies the optional secondary diagnostic write failure.
+                # 真实关闭读端的管道提供可选次要诊断写失败。
+                read_descriptor, write_descriptor = os.pipe()
+                os.close(read_descriptor)
+
+                def stderr_write(content):
+                    """Preserve real partial content; use an OS pipe for this case's diagnostic write.
+                    保留真实部分 content；对此用例的诊断写入使用操作系统管道。
+                    """
+                    if case == "diagnostic-pipe-closed" and content.startswith(b"Partial log persistence failed:"):
+                        return os.write(write_descriptor, content)
+                    return stderr.write(content)
+
+                def shorter_timeout(*arguments, **options):
+                    """Execute real arguments with shortened options timeout; observe and propagate its exception.
+                    以缩短 options 超时执行真实 arguments；观察并传播其异常。
+                    """
+                    options["timeout"] = 1
+                    try:
+                        return original_run(*arguments, **options)
+                    except RELEASE.subprocess.TimeoutExpired as error:
+                        observed.append(error)
+                        raise
+
+                # Emit invalid UTF-8 bytes through real child stdout/stderr before sleeping.
+                # 真实子进程休眠前通过标准输出及错误输出写出无效 UTF-8 字节。
+                program = "import os,time; os.write(1,b'OUT\\xff\\n'); os.write(2,b'ERR\\xfe\\n'); time.sleep(30)"
+                command = [RELEASE.sys.executable, "-I", "-B", "-c", program]
+                try:
+                    with patch.object(RELEASE.subprocess, "run", side_effect=shorter_timeout), \
+                            patch.object(RELEASE.sys, "stdout", SimpleNamespace(buffer=stdout)), \
+                            patch.object(RELEASE.sys, "stderr", SimpleNamespace(buffer=SimpleNamespace(write=stderr_write, flush=stderr.flush))):
+                        # Require the identical actual timeout even if either logging or diagnostic persistence fails.
+                        # 即使日志或诊断持久化失败，也要求同一真实超时。
+                        with self.assertRaises(RELEASE.subprocess.TimeoutExpired) as caught:
+                            RELEASE.run(command, cwd=root, timeout=120, log_prefix=prefix)
+                finally:
+                    os.close(write_descriptor)
+                self.assertEqual(len(observed), 1)
+                self.assertIs(caught.exception, observed[0])
+                self.assertEqual(caught.exception.output, b"OUT\xff\n")
+                self.assertEqual(caught.exception.stderr, b"ERR\xfe\n")
+                self.assertEqual(stdout.getvalue(), b"OUT\xff\n")
+                self.assertTrue(stderr.getvalue().startswith(b"ERR\xfe\n"))
+                for filename, content in preserved.items():
+                    self.assertEqual(filename.read_bytes(), content)
+                self.assertEqual(set(root.rglob("*")), {parent, *preserved})
+                # Safe notes retain type/errno, without exposing path strings or losing the first failure.
+                # 安全注记保留类型及 errno，不暴露路径字符串或丢失首个失败。
+                notes = caught.exception.__notes__
+                self.assertIn("Partial log persistence failed:", notes[0])
+                self.assertIn(" errno=", notes[0])
+                self.assertFalse(any(str(root) in note for note in notes))
+                if case == "diagnostic-pipe-closed":
+                    self.assertEqual(stderr.getvalue(), b"ERR\xfe\n")
+                    self.assertEqual(len(notes), 2)
+                    self.assertIn("Partial log diagnostic display failed:", notes[1])
+                else:
+                    self.assertEqual(len(notes), 1)
+                    self.assertIn(notes[0].encode("ascii"), stderr.getvalue())
+
+
 class ReleaseGateTests(unittest.TestCase):
     """Check identity, aggregation, issuer authentication and immutable assets using unit-only fixtures.
     使用仅限单测的夹具检查身份、聚合、签发方认证和不可变资产。

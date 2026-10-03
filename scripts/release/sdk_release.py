@@ -121,8 +121,58 @@ def run(arguments, cwd=ROOT, env=None, timeout=120, log_prefix=None):
     """
     executable = shutil.which(str(arguments[0]))
     require(executable is not None, f"Missing command: {arguments[0]}")
-    completed = subprocess.run([executable, *map(str, arguments[1:])], cwd=cwd, env=env,
-                               capture_output=True, text=True, encoding="utf-8", timeout=timeout)
+    try:
+        # Capture bytes so Windows text-reader threads cannot discard invalid UTF-8 before timeout.
+        # 捕获字节，防止 Windows 文本读取线程在超时前丢弃无效 UTF-8。
+        completed = subprocess.run([executable, *map(str, arguments[1:])], cwd=cwd, env=env,
+                                   capture_output=True, timeout=timeout)
+    # The timeout exception owns partial bytes even when the normal runner requests text.
+    # 即使普通运行器请求文本，超时异常仍拥有部分输出字节。
+    except subprocess.TimeoutExpired as error:
+        # Display both actual partial streams before attempting any filesystem persistence.
+        # 在任何文件系统持久化前显示两路真实部分输出。
+        for content, terminal in ((error.output, sys.stdout), (error.stderr, sys.stderr)):
+            if content is not None:
+                try:
+                    terminal.buffer.write(content)
+                    terminal.buffer.flush()
+                # The original timeout remains authoritative even if a terminal pipe fails.
+                # 即使终端管道失败，原超时仍为权威。
+                except OSError as terminal_error:
+                    error.add_note(f"Partial stream display failed: {type(terminal_error).__name__} errno={terminal_error.errno}")
+        if log_prefix is not None:
+            try:
+                # Use only the original destination; None never creates invented bytes or files.
+                # 仅使用原目的地；None 绝不制造字节或文件。
+                prefix = Path(log_prefix)
+                prefix.parent.mkdir(parents=True, exist_ok=True)
+                # Save each observed byte stream exclusively under its existing exact suffix.
+                # 将每路已观察字节流独占保存到既有精确后缀。
+                for suffix, content in (("stdout.log", error.output), ("stderr.log", error.stderr)):
+                    if content is not None:
+                        # Binary preservation cannot overwrite previous evidence or normalize partial output.
+                        # 二进制保留不能覆盖以前证据，也不能归一化部分输出。
+                        with Path(str(prefix) + "." + suffix).open("xb") as stream:
+                            stream.write(content)
+            # Persistence failures are secondary diagnostics, never a replacement process failure.
+            # 持久化失败是次要诊断，绝不是替代的进程失败。
+            except OSError as log_error:
+                # Include only safe exception type/errno, never paths, child arguments or environment.
+                # 仅包含安全异常类型及 errno，绝不包含路径、子进程参数或环境。
+                diagnostic = f"Partial log persistence failed: {type(log_error).__name__} errno={log_error.errno}"
+                error.add_note(diagnostic)
+                try:
+                    sys.stderr.buffer.write((diagnostic + "\n").encode("ascii"))
+                    sys.stderr.buffer.flush()
+                # Keep the first safe note even when its terminal diagnostic cannot be written.
+                # 即使终端诊断无法写入，也保留首个安全异常注记。
+                except OSError as diagnostic_error:
+                    error.add_note(f"Partial log diagnostic display failed: {type(diagnostic_error).__name__} errno={diagnostic_error.errno}")
+        raise
+    # Preserve the existing strict UTF-8 and universal-newline contract after real completion.
+    # 真实完成后保留既有严格 UTF-8 及通用换行契约。
+    completed.stdout = completed.stdout.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    completed.stderr = completed.stderr.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     if log_prefix is not None:
         # Preserve raw success/error streams before checking the result; candidate signatures include these exact logs.
         # 检查结果前保留原始成功、错误流；候选签名包含这些精确日志。
