@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { chmod, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, posix as posixPath, relative, resolve, win32 as winPath } from "node:path";
+import { basename, dirname, isAbsolute, join, posix as posixPath, relative, resolve, sep, win32 as winPath } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { createGunzip } from "node:zlib";
 import type { LuaRuntimeHostOptions } from "./types.js";
@@ -1565,10 +1565,23 @@ async function fileSha512Base64(filePath: string): Promise<string> {
 /**
  * Extract one archive with the platform tar implementation.
  * 使用平台 tar 实现解压单个归档。
+ * archivePath names the verified archive; destination is the caller's created sibling extraction directory.
+ * archivePath 指定已验证归档；destination 是调用者创建的同父解压目录。
+ * Return after safe-member validation and successful extraction; failures remain explicit.
+ * 在安全成员验证及成功解压后返回；失败保持明确。
  */
 async function extractArchive(archivePath: string, destination: string): Promise<void> {
   await validateArchiveMembers(archivePath, destination);
-  await runProcess("tar", ["-xf", archivePath, "-C", destination]);
+  // Run beside the original archive so GNU tar cannot interpret its Windows drive colon as a remote host.
+  // 在原归档旁运行，避免 GNU tar 将 Windows 盘符冒号解释为远程主机。
+  const archiveDirectory = dirname(resolve(archivePath));
+  // The local prefix prevents archive names from becoming either remote names or command options.
+  // 本地前缀避免归档名称被解释为远程名称或命令选项。
+  const archiveName = `./${basename(archivePath)}`;
+  // All extraction callers derive this directory beside their archive; forward slashes also work in Windows GNU tar.
+  // 全部解压调用者均在归档旁派生此目录；正斜杠也适用于 Windows GNU tar。
+  const extractionDirectory = `./${relative(archiveDirectory, resolve(destination)).split(sep).join("/")}`;
+  await runProcess("tar", ["-xf", archiveName, "-C", extractionDirectory], archiveDirectory);
 }
 
 /**
@@ -1589,9 +1602,19 @@ export async function validateArchiveMembers(archivePath: string, destination: s
 /**
  * List archive members through the platform tar implementation.
  * 通过平台 tar 实现列出归档成员。
+ * archivePath names the sole original archive; return nonempty member lines after a successful listing.
+ * archivePath 指定唯一原归档；成功列目录后返回非空成员行。
  */
 async function listArchiveMembers(archivePath: string): Promise<string[]> {
-  const output = await runProcessCapture("tar", ["-tf", archivePath]);
+  // Bind listing to the same real archive directory rather than passing a Windows drive name to tar.
+  // 将列目录绑定同一真实归档目录，不向 tar 传入 Windows 盘符名称。
+  const archiveDirectory = dirname(resolve(archivePath));
+  // This exact basename remains local even when it begins with an option-looking character.
+  // 此精确基础文件名始终保持本地语义，包括名称开头看似选项的情况。
+  const archiveName = `./${basename(archivePath)}`;
+  // Preserve the original captured member listing and every subsequent containment check.
+  // 保留原捕获成员列表及全部后续包含关系检查。
+  const output = await runProcessCapture("tar", ["-tf", archiveName], archiveDirectory);
   return output
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -1935,10 +1958,16 @@ function renderVersionTemplate(template: string, version: string): string {
 /**
  * Run one child process and reject when it fails.
  * 运行单个子进程，并在失败时拒绝。
+ * command and args select the exact program/vector; optional cwd selects its directory and omission inherits it.
+ * command 与 args 选择精确程序及向量；可选 cwd 选择工作目录，省略则继承。
+ * Resolve only after zero exit; propagate launch or nonzero-exit errors without retry.
+ * 仅在零退出后完成；原样传播启动或非零退出错误，不重试。
  */
-async function runProcess(command: string, args: string[]): Promise<void> {
+async function runProcess(command: string, args: string[], cwd?: string): Promise<void> {
   await new Promise<void>((resolvePromise, rejectPromise) => {
-    const child = spawn(command, args, { stdio: "inherit" });
+    // Retain the original child until its actual exit; cwd only selects the directory of this exact command.
+    // 保留原子进程直到实际退出；cwd 仅选择此精确命令的工作目录。
+    const child = spawn(command, args, { stdio: "inherit", cwd });
     child.on("error", rejectPromise);
     child.on("exit", (code) => {
       if (code === 0) {
@@ -1975,12 +2004,18 @@ async function runProcessWithEnv(command: string, args: string[], env: Record<st
 /**
  * Run one child process and capture stdout.
  * 运行单个子进程并捕获 stdout。
+ * command and args select the exact program/vector; optional cwd selects its directory and omission inherits it.
+ * command 与 args 选择精确程序及向量；可选 cwd 选择工作目录，省略则继承。
+ * Return decoded stdout only after zero exit; retain stderr in explicit failure without retry.
+ * 仅在零退出后返回解码 stdout；失败时明确保留 stderr，不重试。
  */
-async function runProcessCapture(command: string, args: string[]): Promise<string> {
+async function runProcessCapture(command: string, args: string[], cwd?: string): Promise<string> {
   return new Promise<string>((resolvePromise, rejectPromise) => {
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    // Capture both original streams from the single child; cwd does not replace or retry the selected program.
+    // 捕获唯一子进程的原始双流；cwd 不替换或重试已选择程序。
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], cwd });
     child.stdout.on("data", (chunk) => stdoutChunks.push(Buffer.from(chunk)));
     child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.from(chunk)));
     child.on("error", rejectPromise);

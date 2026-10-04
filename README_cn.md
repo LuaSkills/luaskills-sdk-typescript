@@ -6,7 +6,7 @@ LuaSkills 主仓库：[LuaSkills/luaskills](https://github.com/LuaSkills/luaskil
 
 TypeScript / Node.js SDK，用于通过公共 JSON FFI 接入 LuaSkills 运行时。
 
-此源码面向 `0.6.2` 发布线；发布及资产验收遵循既有发布流程。它沿用严格的技能包级配置契约，并将运行时资产默认值设为 LuaSkills core `v0.6.1`、vldb-controller `v0.2.3` 与 vldb-sqlite `v0.1.6`。
+此源码面向 `0.6.3` 发布线；发布及资产验收遵循既有发布流程。它沿用严格的技能包级配置契约，并将运行时资产默认值设为 LuaSkills core `v0.6.1`、vldb-controller `v0.2.3` 与 vldb-sqlite `v0.1.6`。
 
 SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正式 skill root、带权限语义的管理调用、skill config、provider callback、宿主工具 callback 与 runtime 资产安装。宿主在常规集成中不需要手写底层 FFI buffer 或 JSON 包络。
 
@@ -100,7 +100,7 @@ npm run test:embedded-candidate -- <绝对archive.tgz路径> <绝对候选库路
 
 ## 安装
 
-0.6.2 SDK 要求 Node.js 24 LTS 或更高版本。
+0.6.3 SDK 要求 Node.js 24 LTS 或更高版本。
 
 ```bash
 npm install @luaskills/sdk
