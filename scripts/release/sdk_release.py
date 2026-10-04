@@ -642,20 +642,95 @@ def registry_package(identity, directory):
     return metadata
 
 
-def npm_publish_archive(archive, version):
+def npm_process_diagnostics(command, stdout, stderr, returncode, log_prefix, timeout_error=None):
+    """Display actual npm bytes/status and exclusively save optional raw logs; never replace process errors.
+    显示实际 npm 字节及状态并独占保存可选原始日志，绝不替代子进程错误。
+    command is the exact argv, stdout/stderr are observed optional bytes, returncode is the actual exit or None.
+    command 是精确参数，stdout/stderr 是观察到的可选字节，returncode 是实际退出值或 None。
+    log_prefix selects the sole evidence destination; timeout_error retains the original timeout identity.
+    log_prefix 选择唯一证据目的地；timeout_error 保留原超时身份。
+    Return nothing; filesystem and terminal failures are secondary type/errno diagnostics only.
+    无返回值；文件系统及终端失败仅是次要类型和 errno 诊断。
+    """
+    def secondary_failure(error):
+        """Attach/display safe error type and errno; preserve error authority even if display also fails.
+        附加及显示安全错误类型和 errno；即使显示也失败，仍保留原错误权威。
+        """
+        # Include no environment, token, path or child-output text in a secondary diagnostic.
+        # 次要诊断不包含环境、令牌、路径或子进程输出正文。
+        diagnostic = f"npm process diagnostic failed: {type(error).__name__} errno={error.errno}"
+        if timeout_error is not None:
+            timeout_error.add_note(diagnostic)
+        try:
+            sys.stderr.buffer.write((diagnostic + "\n").encode("ascii"))
+            sys.stderr.buffer.flush()
+        except OSError as display_error:
+            if timeout_error is not None:
+                timeout_error.add_note(f"npm diagnostic display failed: {type(display_error).__name__} errno={display_error.errno}")
+
+    # Display observed bytes before any decode or persistence, including invalid UTF-8 partial output.
+    # 在任何解码或持久化前显示已观察字节，包括无效 UTF-8 部分输出。
+    for content, terminal in ((stdout, sys.stdout), (stderr, sys.stderr)):
+        if content is not None:
+            try:
+                terminal.buffer.write(content)
+                terminal.buffer.flush()
+            except OSError as display_error:
+                secondary_failure(display_error)
+    # A timeout has no completed returncode; never fabricate an exit status for it.
+    # 超时没有完成的退出值；绝不为其伪造退出状态。
+    status = "npm publication process timed out\n" if timeout_error is not None else f"npm publication process returncode={returncode}\n"
+    try:
+        sys.stderr.buffer.write(status.encode("ascii"))
+        sys.stderr.buffer.flush()
+    except OSError as display_error:
+        secondary_failure(display_error)
+    if log_prefix is not None:
+        try:
+            # All names derive from the fresh publication output; old evidence is never overwritten.
+            # 全部名称派生自全新发布输出；绝不覆盖旧证据。
+            prefix = Path(log_prefix)
+            prefix.parent.mkdir(parents=True, exist_ok=True)
+            for suffix, content in (("stdout.log", stdout), ("stderr.log", stderr)):
+                if content is not None:
+                    with Path(str(prefix) + "." + suffix).open("xb") as stream:
+                        stream.write(content)
+            write_json(Path(str(prefix) + ".process.json"), {"argv":command, "cwd":str(ROOT),
+                "returncode":returncode, "timed_out":timeout_error is not None,
+                "observed_timeout":None if timeout_error is None else timeout_error.timeout})
+        except OSError as log_error:
+            secondary_failure(log_error)
+
+
+def npm_publish_archive(archive, version, log_prefix=None):
     """Publish the exact archive once; return whether a documented version-conflict requires verification.
     仅发布精确归档一次；返回是否出现需复核的已定义版本冲突。
     """
+    # archive/version identify the authenticated package; optional log_prefix owns raw process diagnostics.
+    # archive/version 标识已认证包；可选 log_prefix 拥有原始子进程诊断。
     # JSON is npm's documented error transport; permission/service failures never imply successful publication.
     # JSON 是 npm 已定义的错误传输；权限、服务错误绝不能代表发布成功。
     executable = shutil.which("npm")
     require(executable is not None, "Missing command: npm")
     command = [executable, "publish", str(archive), "--ignore-scripts", "--provenance", "--access", "public",
                "--registry", "https://registry.npmjs.org", "--json"]
-    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=180)
+    try:
+        # Capture raw streams once; preserve the original 180-second budget and inherited environment.
+        # 仅捕获一次原始双流；保留原 180 秒预算及继承环境。
+        completed = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=180)
+    except subprocess.TimeoutExpired as error:
+        npm_process_diagnostics(command, error.output, error.stderr, None, log_prefix, error)
+        raise
+    npm_process_diagnostics(command, completed.stdout, completed.stderr, completed.returncode, log_prefix)
+    # Retain strict UTF-8 and universal newlines before the existing zero/conflict/error decisions.
+    # 在原零退出、冲突及错误判定前保留严格 UTF-8 和通用换行。
+    stdout = completed.stdout.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    # The original text reader rejected malformed stderr too, even for a zero exit.
+    # 原文本读取器也拒绝坏标准错误编码，即使子进程零退出。
+    completed.stderr.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     if completed.returncode == 0:
         return False
-    failure = json.loads(completed.stdout, object_pairs_hook=pairs)
+    failure = json.loads(stdout, object_pairs_hook=pairs)
     require(isinstance(failure, dict) and isinstance(failure.get("error"), dict), "npm publication failed without a structured error")
     error = failure["error"]
     require(isinstance(error.get("summary"), str), "npm publication failed without an error summary")
@@ -704,7 +779,10 @@ def publish_or_verify(args):
             if missing.code != 404 or missing.url != version_url:
                 raise
             missing.close()
-            race = npm_publish_archive(archive, identity["sdk_version"])
+            # Diagnostics share the original output's unique ownership, independently of publication success.
+            # 诊断共享原输出的唯一归属，独立于发布是否成功。
+            log_prefix = Path(args.output).with_suffix(".npm")
+            race = npm_publish_archive(archive, identity["sdk_version"], log_prefix=log_prefix)
             # A zero exit or known race is still not success until a fresh official download matches the tested bytes.
             # 零退出码或已知竞争仍不是成功，必须新下载官方字节并匹配被测归档。
             metadata = registry_package(identity, directory)

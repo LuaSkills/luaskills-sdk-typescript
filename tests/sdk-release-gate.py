@@ -70,6 +70,265 @@ class RecoveryHttp:
 
 
 
+class NpmPublicationDiagnosticsTests(unittest.TestCase):
+    """Exercise only the npm boundary with real owned Python children and captured terminal bytes.
+    仅使用真实自有 Python 子进程及捕获的终端字节验证 npm 边界。
+    """
+
+    def test_real_zero_exit_shows_original_streams_and_exact_status(self):
+        """Require both real child streams and its exact zero status without running npm publication.
+        不执行 npm 发布，要求真实子进程双流及精确零退出状态。
+        """
+        # Preserve the real child implementation while replacing only the external npm executable.
+        # 保留真实子进程实现，仅替换外部 npm 可执行入口。
+        original_run = RELEASE.subprocess.run
+        # These actual bytes include CRLF so diagnostic preservation differs from text normalization.
+        # 这些实际字节包含 CRLF，使诊断留存区别于文本归一化。
+        expected_stdout, expected_stderr = b'{}\r\n', b'warning\r\n'
+        # Capture terminal bytes and actual process results without fabricating a result object.
+        # 捕获终端字节及实际子进程结果，不伪造结果对象。
+        stdout, stderr, observed = io.BytesIO(), io.BytesIO(), []
+
+        def actual_child(arguments, **options):
+            """Validate original npm arguments, execute the owned child and retain its actual result.
+            验证原 npm 参数，执行自有子进程并保留实际结果。
+            """
+            self.assertEqual(arguments[1:3], ['publish', 'unit-owned.tgz'])
+            self.assertEqual(options['timeout'], 180)
+            # Write bytes directly through actual operating-system stdout and stderr descriptors.
+            # 经实际操作系统标准输出及错误描述符直接写出字节。
+            program = "import os; os.write(1,b'{}\\r\\n'); os.write(2,b'warning\\r\\n')"
+            # The original process options remain authoritative for the production capture behavior.
+            # 原子进程选项仍是生产捕获行为的权威。
+            completed = original_run([RELEASE.sys.executable, '-I', '-B', '-c', program], **options)
+            observed.append(completed)
+            return completed
+
+        with patch.object(RELEASE.shutil, 'which', return_value=RELEASE.sys.executable), \
+                patch.object(RELEASE.subprocess, 'run', side_effect=actual_child), \
+                patch.object(RELEASE.sys, 'stdout', SimpleNamespace(buffer=stdout)), \
+                patch.object(RELEASE.sys, 'stderr', SimpleNamespace(buffer=stderr)):
+            self.assertFalse(RELEASE.npm_publish_archive(Path('unit-owned.tgz'), '0.6.3'))
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0].returncode, 0)
+        self.assertEqual(stdout.getvalue(), expected_stdout)
+        self.assertEqual(stderr.getvalue(), expected_stderr + b'npm publication process returncode=0\n')
+
+    def execute_child(self, stdout_bytes, stderr_bytes, returncode, prefix, pause=False, diagnostic_descriptor=None):
+        """Run one real child through npm's boundary and return outcome, terminal bytes and actual process trace.
+        经 npm 边界运行一个真实子进程，返回结果、终端字节及实际子进程轨迹。
+        stdout_bytes/stderr_bytes and returncode define this owned child; prefix selects its fresh logs.
+        stdout_bytes/stderr_bytes 和 returncode 定义本自有子进程；prefix 选择全新日志。
+        pause shortens only the test timeout; no npm publication or fabricated result/exception is used.
+        pause 仅缩短测试超时；不执行 npm 发布，也不伪造结果或异常。
+        diagnostic_descriptor optionally selects a real closed-read pipe for secondary diagnostic failure.
+        diagnostic_descriptor 可选地指定真实已关闭读端管道，用于次要诊断失败。
+        """
+        # Keep actual execution and raw terminal buffers separate from the publication decision.
+        # 将实际执行及原始终端缓冲与发布判定分离。
+        original_run = RELEASE.subprocess.run
+        stdout, stderr, observed = io.BytesIO(), io.BytesIO(), []
+        # The script emits exact OS bytes then either sleeps or exits with the requested real status.
+        # 脚本写出精确操作系统字节，然后休眠或以指定实际状态退出。
+        program = f"import os,time,sys; os.write(1,{stdout_bytes!r}); os.write(2,{stderr_bytes!r}); " + (
+            "time.sleep(30)" if pause else f"sys.exit({returncode})")
+
+        def write_stderr(content):
+            """Capture original content; route only the secondary diagnostic to the optional real OS pipe.
+            捕获原内容；仅将次要诊断送往可选真实操作系统管道。
+            """
+            if diagnostic_descriptor is not None and content.startswith(b'npm process diagnostic failed:'):
+                return os.write(diagnostic_descriptor, content)
+            return stderr.write(content)
+
+        def actual_child(arguments, **options):
+            """Validate original argv/budget and execute the real owned child with the same capture options.
+            验证原参数及预算，用相同捕获选项执行真实自有子进程。
+            """
+            self.assertEqual(arguments[1:], ['publish', 'unit-owned.tgz', '--ignore-scripts', '--provenance',
+                '--access', 'public', '--registry', 'https://registry.npmjs.org', '--json'])
+            self.assertEqual(options['timeout'], 180)
+            self.assertEqual(options['cwd'], RELEASE.ROOT)
+            self.assertNotIn('env', options)
+            if pause:
+                options['timeout'] = 1
+            try:
+                # Store the true result for exact integer status comparisons.
+                # 保存真实结果以精确比较整数退出状态。
+                completed = original_run([RELEASE.sys.executable, '-I', '-B', '-c', program], **options)
+                observed.append(completed)
+                return completed
+            except RELEASE.subprocess.TimeoutExpired as error:
+                observed.append(error)
+                raise
+
+        with patch.object(RELEASE.shutil, 'which', return_value=RELEASE.sys.executable), \
+                patch.object(RELEASE.subprocess, 'run', side_effect=actual_child), \
+                patch.object(RELEASE.sys, 'stdout', SimpleNamespace(buffer=stdout)), \
+                patch.object(RELEASE.sys, 'stderr', SimpleNamespace(buffer=SimpleNamespace(write=write_stderr,flush=stderr.flush))):
+            try:
+                # Outcome is either the existing Boolean decision or the actual production exception.
+                # outcome 是既有布尔判定或实际生产异常。
+                outcome = RELEASE.npm_publish_archive(Path('unit-owned.tgz'), '0.6.3', log_prefix=prefix)
+            except (ValueError, RELEASE.subprocess.TimeoutExpired) as error:
+                outcome = error
+        return outcome, stdout.getvalue(), stderr.getvalue(), observed
+
+    def test_real_completed_processes_preserve_raw_logs_and_existing_decisions(self):
+        """Verify zero/conflict/unknown/JSON/UTF-8 behavior from real process bytes and exact exit receipts.
+        经真实子进程字节及精确退出回执验证零退出、冲突、未知、JSON 和 UTF-8 行为。
+        """
+        # Define only original documented conflict semantics and actual malformed output boundaries.
+        # 仅定义原已声明冲突语义及实际坏输出边界。
+        cases = [
+            (b'{}\r\n', b'warning\r\n', 0, False),
+            (b'{"error":{"code":"EPUBLISHCONFLICT","summary":"Conflict"}}\r\n', b'npm conflict\r\n', 17, True),
+            (b'{"error":{"code":"E409","summary":"Conflict"}}\n', b'npm conflict\n', 18, True),
+            (b'{"error":{"summary":"You cannot publish over the previously published versions: 0.6.3."}}\n', b'npm conflict\n', 19, True),
+            (b'{"error":{"code":"E403","summary":"Forbidden"}}\r\n', b'denied\r\n', 23, ValueError),
+            (b'{invalid json\r\n', b'bad JSON\r\n', 24, json.JSONDecodeError),
+            (b'{}\xff\r\n', b'bad encoding\r\n', 0, UnicodeDecodeError),
+            (b'{}\r\n', b'bad encoding\xfe\r\n', 0, UnicodeDecodeError)]
+        for stdout_bytes, stderr_bytes, returncode, expected in cases:
+            with self.subTest(returncode=returncode, stdout=stdout_bytes), tempfile.TemporaryDirectory() as directory:
+                # Own one fresh raw-log prefix per true child, never a publication-success observation.
+                # 每个真实子进程独占一个原始日志前缀，不作为发布成功观察。
+                prefix = Path(directory) / 'npm'
+                outcome, stdout, stderr, observed = self.execute_child(stdout_bytes, stderr_bytes, returncode, prefix)
+                if isinstance(expected, type):
+                    self.assertIsInstance(outcome, expected)
+                else:
+                    self.assertIs(outcome, expected)
+                self.assertEqual(len(observed), 1)
+                self.assertEqual(observed[0].returncode, returncode)
+                self.assertEqual(stdout, stdout_bytes)
+                self.assertEqual(stderr, stderr_bytes + f'npm publication process returncode={returncode}\n'.encode('ascii'))
+                self.assertEqual(Path(str(prefix)+'.stdout.log').read_bytes(), stdout_bytes)
+                self.assertEqual(Path(str(prefix)+'.stderr.log').read_bytes(), stderr_bytes)
+                # Receipt status is an observation only and includes no environment or claimed publish outcome.
+                # 回执状态仅是观察，不包含环境或宣称发布结果。
+                receipt = RELEASE.read_json(Path(str(prefix)+'.process.json'))
+                self.assertEqual(receipt['returncode'], returncode)
+                self.assertFalse(receipt['timed_out'])
+                self.assertIsNone(receipt['observed_timeout'])
+                self.assertNotIn('env', receipt)
+                self.assertNotIn('success', receipt)
+
+    def test_real_timeout_and_log_failures_preserve_original_error_and_evidence(self):
+        """Require actual partial bytes and exception identity despite real existing-file/parent-file failures.
+        即使真实已有文件或父路径文件导致失败，仍要求实际部分字节及原异常身份。
+        """
+        for case in ('fresh', 'existing', 'parent-file'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                # Establish real filesystem obstacles, retaining every original sentinel byte.
+                # 建立真实文件系统障碍，保留每个原哨兵字节。
+                parent = Path(directory)/'logs'
+                prefix = parent/'npm'
+                preserved = {}
+                if case == 'parent-file':
+                    parent.write_bytes(b'owned-parent')
+                    preserved[parent] = parent.read_bytes()
+                elif case == 'existing':
+                    parent.mkdir()
+                    for suffix in ('stdout.log', 'stderr.log', 'process.json'):
+                        filename = Path(str(prefix)+'.'+suffix)
+                        filename.write_bytes(b'owned-'+suffix.encode('ascii'))
+                        preserved[filename] = filename.read_bytes()
+                # Non-UTF8 timeout bytes are real; strict normal-result decoding is never applied to them.
+                # 超时非 UTF-8 字节是真实的；不对其应用普通结果严格解码。
+                outcome, stdout, stderr, observed = self.execute_child(b'OUT\xff\r\n', b'ERR\xfe\r\n', 0, prefix, pause=True)
+                self.assertIsInstance(outcome, RELEASE.subprocess.TimeoutExpired)
+                self.assertEqual(len(observed), 1)
+                self.assertIs(outcome, observed[0])
+                self.assertEqual(outcome.output, b'OUT\xff\r\n')
+                self.assertEqual(outcome.stderr, b'ERR\xfe\r\n')
+                self.assertEqual(stdout, outcome.output)
+                self.assertTrue(stderr.startswith(outcome.stderr+b'npm publication process timed out\n'))
+                if case == 'fresh':
+                    self.assertEqual(Path(str(prefix)+'.stdout.log').read_bytes(), outcome.output)
+                    self.assertEqual(Path(str(prefix)+'.stderr.log').read_bytes(), outcome.stderr)
+                    receipt = RELEASE.read_json(Path(str(prefix)+'.process.json'))
+                    self.assertIsNone(receipt['returncode'])
+                    self.assertTrue(receipt['timed_out'])
+                    self.assertEqual(receipt['observed_timeout'], outcome.timeout)
+                else:
+                    for filename, content in preserved.items():
+                        self.assertEqual(filename.read_bytes(), content)
+                    self.assertTrue(any('npm process diagnostic failed:' in note for note in outcome.__notes__))
+                    self.assertFalse(any(str(parent) in note for note in outcome.__notes__))
+
+    def test_real_secondary_diagnostic_pipe_failure_cannot_replace_timeout(self):
+        """Require the same actual timeout when both exclusive persistence and a real OS pipe fail.
+        独占持久化和真实操作系统管道均失败时，仍要求同一实际超时。
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            # Preserve an actual existing file and create a real broken pipe, not an exception substitute.
+            # 保留实际已有文件并创建真实坏管道，不使用异常替身。
+            prefix = Path(directory)/'npm'
+            filename = Path(str(prefix)+'.stdout.log')
+            filename.write_bytes(b'owned-before')
+            read_descriptor, write_descriptor = os.pipe()
+            os.close(read_descriptor)
+            try:
+                # Execute one actual child and fail only the secondary diagnostic's OS write.
+                # 执行一个实际子进程，仅使次要诊断的操作系统写入失败。
+                outcome, stdout, stderr, observed = self.execute_child(b'OUT\xff\n', b'ERR\xfe\n', 0,
+                    prefix, pause=True, diagnostic_descriptor=write_descriptor)
+            finally:
+                os.close(write_descriptor)
+            self.assertIs(outcome,observed[0])
+            self.assertIsInstance(outcome,RELEASE.subprocess.TimeoutExpired)
+            self.assertEqual(stdout,b'OUT\xff\n')
+            self.assertEqual(stderr,b'ERR\xfe\nnpm publication process timed out\n')
+            self.assertEqual(filename.read_bytes(),b'owned-before')
+            self.assertEqual(len(outcome.__notes__),2)
+            self.assertIn('npm process diagnostic failed:',outcome.__notes__[0])
+            self.assertIn('npm diagnostic display failed:',outcome.__notes__[1])
+            self.assertFalse(any(str(prefix) in note for note in outcome.__notes__))
+
+    def test_real_silent_timeout_records_only_observed_streams(self):
+        """Retain the actual no-output timeout identity without inventing unavailable bytes or an exit code.
+        保留实际无输出超时身份，不伪造不可用字节或退出码。
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            # Keep one new destination and the true OS exception streams, including optional None.
+            # 保留一个新目的地及真实操作系统异常输出，包括可选 None。
+            prefix = Path(directory)/'npm'
+            outcome, stdout, stderr, observed = self.execute_child(b'', b'', 0, prefix, pause=True)
+            self.assertIsInstance(outcome, RELEASE.subprocess.TimeoutExpired)
+            self.assertEqual(len(observed), 1)
+            self.assertIs(outcome, observed[0])
+            self.assertEqual(stdout,b'')
+            self.assertEqual(stderr,b'npm publication process timed out\n')
+            for suffix, content in (('stdout.log',outcome.output),('stderr.log',outcome.stderr)):
+                # None means no observed stream, while an observed empty byte stream is saved exactly.
+                # None 表示未观察到输出流，观察到的空字节流则精确保存。
+                filename = Path(str(prefix)+'.'+suffix)
+                if content is None:
+                    self.assertFalse(filename.exists())
+                else:
+                    self.assertEqual(filename.read_bytes(),content)
+            self.assertIsNone(RELEASE.read_json(Path(str(prefix)+'.process.json'))['returncode'])
+
+    def test_real_json_error_survives_secondary_log_failure(self):
+        """Keep the original JSON error visible while preserving existing log bytes and actual process status.
+        保留既有日志字节及实际子进程状态，同时保持原 JSON 错误可见。
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            # A real existing stdout log denies exclusive persistence without hiding malformed JSON.
+            # 真实已有标准输出日志拒绝独占持久化，但不隐藏坏 JSON。
+            prefix = Path(directory)/'npm'
+            filename = Path(str(prefix)+'.stdout.log')
+            filename.write_bytes(b'owned-before')
+            outcome, stdout, stderr, observed = self.execute_child(b'{bad\n', b'ERR\n', 31, prefix)
+            self.assertIsInstance(outcome, json.JSONDecodeError)
+            self.assertEqual(filename.read_bytes(), b'owned-before')
+            self.assertEqual(stdout,b'{bad\n')
+            self.assertTrue(stderr.startswith(b'ERR\nnpm publication process returncode=31\n'))
+            self.assertIn(b'npm process diagnostic failed:',stderr)
+            self.assertEqual(observed[0].returncode,31)
+
+
 class TimeoutDiagnosticsTests(unittest.TestCase):
     """Verify binary partial output and silent timeouts with real subprocess exceptions.
     使用真实子进程异常核验二进制部分输出及无输出超时。
@@ -958,7 +1217,7 @@ class ReleaseGateTests(unittest.TestCase):
         """
         args = self.publication_args()
         args.output = self.root / "publication.json"
-        completed = RELEASE.subprocess.CompletedProcess([], 0, "{}", "")
+        completed = RELEASE.subprocess.CompletedProcess([], 0, b"{}", b"")
         stack, command = self.publication_context([self.missing_npm_version(), self.npm_metadata()],
                                                   [io.BytesIO(self.archive.read_bytes())], completed)
         with stack:
@@ -967,6 +1226,38 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertEqual(command.call_args.args[0], ["unit-only-npm", "publish", str(self.archive), "--ignore-scripts", "--provenance",
                                                      "--access", "public", "--registry", "https://registry.npmjs.org", "--json"])
         self.assertEqual(RELEASE.read_json(args.output)["action"], "published")
+
+    def test_postpublication_exact_404_preserves_failure_without_second_publish(self):
+        """Preserve the actual second HTTP404 after zero/conflict; record process evidence but no success.
+        在零退出或冲突后保留第二个实际 HTTP404；记录子进程证据而不生成成功。
+        """
+        # Both original accepted npm decisions must still obey the fresh registry postcondition.
+        # 两种原可接受 npm 判定都必须服从全新注册表后置条件。
+        args = self.publication_args()
+        for conflict in (False, True):
+            with self.subTest(conflict=conflict):
+                # Keep each output and derived diagnostics distinct and originally nonexistent.
+                # 每份输出及派生诊断保持独立且原先不存在。
+                args.output = self.root / f'postpublication-404-{conflict}.json'
+                # Model only the external npm boundary as in existing publication tests.
+                # 按既有发布测试，仅模拟外部 npm 边界。
+                stdout = b'{"error":{"code":"E409","summary":"Conflict"}}' if conflict else b'{}'
+                completed = RELEASE.subprocess.CompletedProcess([], 17 if conflict else 0, stdout, b'observed stderr\r\n')
+                # The second precise endpoint exception must retain its original object identity.
+                # 第二个精确端点异常必须保留原对象身份。
+                second = self.missing_npm_version()
+                stack, command = self.publication_context([self.missing_npm_version(), second], [], completed)
+                with stack, self.assertRaises(RELEASE.urllib.error.HTTPError) as caught:
+                    RELEASE.publish_or_verify(args)
+                self.assertIs(caught.exception, second)
+                command.assert_called_once()
+                self.assertFalse(args.output.exists())
+                # The actual diagnostic receipt never asserts publication success or triggers retry.
+                # 实际诊断回执绝不声称发布成功或触发重试。
+                prefix = args.output.with_suffix('.npm')
+                self.assertEqual(Path(str(prefix)+'.stdout.log').read_bytes(), stdout)
+                self.assertEqual(Path(str(prefix)+'.stderr.log').read_bytes(), b'observed stderr\r\n')
+                self.assertEqual(RELEASE.read_json(Path(str(prefix)+'.process.json'))['returncode'], completed.returncode)
 
     def test_registry_unknown_or_missing_tarball_never_publishes(self):
         """Reject permission/service states and a broken existing tarball without interpreting them as absence.
@@ -1001,7 +1292,7 @@ class ReleaseGateTests(unittest.TestCase):
         for index, error in enumerate(errors):
             with self.subTest(error=error):
                 args.output = self.root / f"race-{index}.json"
-                completed = RELEASE.subprocess.CompletedProcess([], 1, json.dumps({"error": error}), "")
+                completed = RELEASE.subprocess.CompletedProcess([], 1, json.dumps({"error": error}).encode("utf-8"), b"")
                 stack, command = self.publication_context([self.missing_npm_version(), self.npm_metadata()],
                                                           [io.BytesIO(self.archive.read_bytes())], completed)
                 with stack:
@@ -1024,7 +1315,7 @@ class ReleaseGateTests(unittest.TestCase):
                                         {"summary": "Unknown failure"}, {"code": "E403", "summary": f"You cannot publish over the previously published versions: {self.identity['sdk_version']}."})):
             with self.subTest(error=error):
                 args.output = self.root / f"failure-{index}.json"
-                completed = RELEASE.subprocess.CompletedProcess([], 1, json.dumps({"error": error}), "")
+                completed = RELEASE.subprocess.CompletedProcess([], 1, json.dumps({"error": error}).encode("utf-8"), b"")
                 stack, command = self.publication_context([self.missing_npm_version()], [], completed)
                 with stack, self.assertRaisesRegex(ValueError, "npm publication failed"):
                     RELEASE.publish_or_verify(args)
