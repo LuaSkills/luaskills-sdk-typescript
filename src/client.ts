@@ -1893,6 +1893,7 @@ export function defaultHostOptions(runtimeRoot: string): LuaRuntimeHostOptions {
     allow_network_download: true,
     github_base_url: null,
     github_api_base_url: null,
+    github_token: null,
     sqlite_library_path: null,
     sqlite_provider_mode: "dynamic_library",
     sqlite_callback_mode: "standard",

@@ -31,13 +31,13 @@ export const EMBEDDED_CONTRACT_VERSION = 1 as const;
  * Generated wire shape for EMBEDDED_CORE_VERSION.
  * EMBEDDED_CORE_VERSION 的生成线形状。
  */
-export const EMBEDDED_CORE_VERSION = "0.6.2" as const;
+export const EMBEDDED_CORE_VERSION = "0.7.0" as const;
 
 /**
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "7bb8a28185f4dcfb7346cec68ee13aae734f6d32d60f34322d745f5183b6a257" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "e55d6f5523f16fdbc45c76726dbcf381d7ce355ff809a1276a9366d8d229ea4a" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -743,6 +743,11 @@ export type InputLuaRuntimeHostOptions = ({
  */
 "github_base_url"?: (string | null);
 /**
+ * Optional GitHub token, sent only to the official `https://api.github.com` host.
+ * 可选的 GitHub 令牌，只发送给官方 `https://api.github.com` 主机。
+ */
+"github_token"?: (InputLuaRuntimeSecretString | null);
+/**
  * Host-managed root directory used only to probe host-provided FFI/native dependencies.
  * 仅用于探测宿主提供 FFI/原生依赖的宿主管理根目录。
  */
@@ -932,6 +937,12 @@ export type InputLuaRuntimeRunLuaPoolConfig = ({
  */
 "min_size": EmbeddedInteger;
 } & Record<string, EmbeddedJsonValue>);
+
+/**
+ * Secret text supplied by the host, such as a GitHub token, that `Debug` never prints.
+ * 宿主提供的机密文本（例如 GitHub 令牌），`Debug` 永不打印其内容。
+ */
+export type InputLuaRuntimeSecretString = string;
 
 /**
  * Host-provided controller client options used when one database backend chooses `space_controller`.

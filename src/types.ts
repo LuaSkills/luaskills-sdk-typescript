@@ -371,6 +371,11 @@ export type LuaRuntimeHostOptions = {
    */
   github_api_base_url: string | null;
   /**
+   * Optional GitHub token, sent only to the official `https://api.github.com` host.
+   * 可选的 GitHub 令牌，只发送给官方 `https://api.github.com` 主机。
+   */
+  github_token: string | null;
+  /**
    * Optional SQLite library path.
    * 可选 SQLite 动态库路径。
    */
