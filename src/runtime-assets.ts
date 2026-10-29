@@ -5,6 +5,7 @@ import { chmod, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/prom
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix as posixPath, relative, resolve, sep, win32 as winPath } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import type { LuaRuntimeHostOptions } from "./types.js";
 
@@ -1624,72 +1625,94 @@ async function listArchiveMembers(archivePath: string): Promise<string[]> {
 /**
  * Validate one gzip-compressed tar archive including link targets.
  * 校验单个 gzip 压缩 tar 归档及其链接目标。
+ * One pass over the decompressed stream: only headers and metadata payloads are held, so time stays linear in archive size.
+ * 单次遍历解压流：仅保留 header 与元数据载荷，耗时随归档大小线性增长。
  */
 async function validateTarGzMembers(archivePath: string, destination: string): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    let buffer = Buffer.alloc(0);
-    let pendingLongName: string | null = null;
-    let pendingLongLink: string | null = null;
-    let pendingPax: Record<string, string> | null = null;
-    const stream = createReadStream(archivePath).pipe(createGunzip());
+  // One header block; a header may span decompressed chunks, so it is gathered here first.
+  // 单个 header block；header 可能跨越解压分块，因此先在此收集。
+  const header = Buffer.alloc(512);
+  let headerLength = 0;
+  // Payload and padding bytes still to pass before the next header; file contents are never buffered.
+  // 下一个 header 之前仍需跳过的载荷与填充字节；文件内容从不缓存。
+  let skip = 0;
+  // Long-name, long-link or pax payload being gathered; null while file contents stream past.
+  // 正在收集的长名称、长链接或 pax 载荷；文件内容流过时为 null。
+  let metadata: { typeFlag: string; size: number; chunks: Buffer[]; length: number } | null = null;
+  let pendingLongName: string | null = null;
+  let pendingLongLink: string | null = null;
+  let pendingPax: Record<string, string> | null = null;
 
-    const parseAvailableBlocks = (): void => {
-      while (buffer.length >= 512) {
-        const header = buffer.subarray(0, 512);
-        if (isTarEndBlock(header)) {
-          buffer = buffer.subarray(512);
+  const acceptMetadata = (typeFlag: string, payload: Buffer): void => {
+    if (typeFlag === "L") {
+      pendingLongName = tarPayloadString(payload);
+    } else if (typeFlag === "K") {
+      pendingLongLink = tarPayloadString(payload);
+    } else if (typeFlag === "x") {
+      pendingPax = parsePaxHeader(payload);
+    } else {
+      validateGlobalPaxHeader(parsePaxHeader(payload));
+    }
+  };
+
+  const acceptHeader = (): void => {
+    if (isTarEndBlock(header)) {
+      return;
+    }
+    const size = parseTarSize(header.subarray(124, 136));
+    skip = Math.ceil(size / 512) * 512;
+    const typeFlag = tarString(header.subarray(156, 157));
+    if (typeFlag === "L" || typeFlag === "K" || typeFlag === "x" || typeFlag === "g") {
+      if (skip === 0) {
+        acceptMetadata(typeFlag, Buffer.alloc(0));
+      } else {
+        metadata = { typeFlag, size, chunks: [], length: 0 };
+      }
+      return;
+    }
+    const memberName = pendingPax?.path ?? pendingLongName ?? tarMemberName(header);
+    const linkName = pendingPax?.linkpath ?? pendingLongLink ?? tarString(header.subarray(157, 257));
+    validateTarMemberType(typeFlag, memberName);
+    validateArchiveMemberPath(destination, memberName);
+    if (typeFlag === "2") {
+      validateArchiveLinkTarget(destination, memberName, linkName);
+    } else if (typeFlag === "1" && linkName) {
+      validateArchiveMemberPath(destination, linkName);
+    }
+    pendingLongName = null;
+    pendingLongLink = null;
+    pendingPax = null;
+  };
+
+  await pipeline(createReadStream(archivePath), createGunzip(), async (source: AsyncIterable<Buffer>) => {
+    for await (const chunk of source) {
+      let offset = 0;
+      while (offset < chunk.length) {
+        if (skip > 0) {
+          const step = Math.min(skip, chunk.length - offset);
+          if (metadata !== null && metadata.length < metadata.size) {
+            const take = Math.min(step, metadata.size - metadata.length);
+            metadata.chunks.push(chunk.subarray(offset, offset + take));
+            metadata.length += take;
+          }
+          skip -= step;
+          offset += step;
+          if (skip === 0 && metadata !== null) {
+            acceptMetadata(metadata.typeFlag, Buffer.concat(metadata.chunks));
+            metadata = null;
+          }
           continue;
         }
-        const size = parseTarSize(header.subarray(124, 136));
-        const paddedSize = Math.ceil(size / 512) * 512;
-        if (buffer.length < 512 + paddedSize) {
-          return;
+        const take = Math.min(512 - headerLength, chunk.length - offset);
+        chunk.copy(header, headerLength, offset, offset + take);
+        headerLength += take;
+        offset += take;
+        if (headerLength === 512) {
+          headerLength = 0;
+          acceptHeader();
         }
-        const payload = buffer.subarray(512, 512 + size);
-        const typeFlag = tarString(header.subarray(156, 157));
-        if (typeFlag === "L") {
-          pendingLongName = tarPayloadString(payload);
-        } else if (typeFlag === "K") {
-          pendingLongLink = tarPayloadString(payload);
-        } else if (typeFlag === "x") {
-          pendingPax = parsePaxHeader(payload);
-        } else if (typeFlag === "g") {
-          validateGlobalPaxHeader(parsePaxHeader(payload));
-        } else {
-          const memberName = pendingPax?.path ?? pendingLongName ?? tarMemberName(header);
-          const linkName = pendingPax?.linkpath ?? pendingLongLink ?? tarString(header.subarray(157, 257));
-          validateTarMemberType(typeFlag, memberName);
-          validateArchiveMemberPath(destination, memberName);
-          if (typeFlag === "2") {
-            validateArchiveLinkTarget(destination, memberName, linkName);
-          } else if (typeFlag === "1" && linkName) {
-            validateArchiveMemberPath(destination, linkName);
-          }
-          pendingLongName = null;
-          pendingLongLink = null;
-          pendingPax = null;
-        }
-        buffer = buffer.subarray(512 + paddedSize);
       }
-    };
-
-    stream.on("data", (chunk) => {
-      try {
-        buffer = Buffer.concat([buffer, chunk]);
-        parseAvailableBlocks();
-      } catch (error) {
-        stream.destroy(error as Error);
-      }
-    });
-    stream.on("error", rejectPromise);
-    stream.on("end", () => {
-      try {
-        parseAvailableBlocks();
-        resolvePromise();
-      } catch (error) {
-        rejectPromise(error);
-      }
-    });
+    }
   });
 }
 
