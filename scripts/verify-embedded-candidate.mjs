@@ -131,7 +131,7 @@ process.stdout.write(JSON.stringify(result)+'\\n');
 
 // This gate has no skip path; all four candidate inputs must be explicitly supplied.
 // 本门禁没有跳过路径；必须显式提供全部四项候选输入。
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.length !== 6) throw new Error("Usage: npm run test:embedded-candidate -- <absolute-archive.tgz> <absolute-library> <library-sha256> <absolute-description.json>");
   verifyCandidate(...process.argv.slice(2));
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -85,7 +85,7 @@ for (const entry of vectors.invalid_bytes) assert.throws(() => codec.decodeEmbed
 
 // Explicit archive selection prevents verification from silently choosing an old build.
 // 显式选择归档，避免验证时静默选中旧构建。
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.length !== 3) throw new Error("Usage: node scripts/verify-embedded-distribution.mjs <archive.tgz>");
   verifyDistribution(process.argv[2]);
   process.stdout.write("Embedded npm distribution verified\n");

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -292,4 +292,6 @@ export function main(args) {
 
 // Imports expose pure generator functions to tests; direct invocation owns CLI mutation.
 // 导入向测试暴露纯生成函数；直接调用负责命令行变更。
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2));
+// Node resolves symlinks for the entry module, so compare real paths (macOS tmpdir is /var -> /private/var).
+// Node 会解析入口模块的符号链接，因此比较真实路径（macOS 临时目录 /var 指向 /private/var）。
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2));
