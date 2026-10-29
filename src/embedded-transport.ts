@@ -2,7 +2,7 @@ import { constants as bufferConstants } from "node:buffer";
 import { createHash } from "node:crypto";
 import { EMBEDDED_CONTROL_WORKERS } from "./embedded-worker-protocol.js";
 import koffi from "koffi";
-import { resolveLibraryPath } from "./ffi.js";
+import { nativeBytes, resolveLibraryPath } from "./ffi.js";
 import { EMBEDDED_DESCRIPTION_MAX_BYTES, EMBEDDED_PROTOCOL_VERSION, EmbeddedNativeStatus, type EmbeddedInteger, type EmbeddedJsonValue, type InputCommand, type OutputCoreDescription } from "./embedded-contract.js";
 import { decodeCoreDescription, EmbeddedCompatibilityError } from "./embedded-compatibility.js";
 import { decodeEmbeddedJson, embeddedUnsignedInteger, encodeEmbeddedJson } from "./embedded-json.js";
@@ -113,7 +113,7 @@ export function bindEmbeddedNative(libraryPath: string): EmbeddedNativeBindings 
   if (borrowed.ptr === null || length === 0n || length > BigInt(EMBEDDED_DESCRIPTION_MAX_BYTES)) throw new EmbeddedCompatibilityError("Invalid native core description buffer");
   const address = koffi.address(borrowed.ptr);
   if (address === 0n) throw new EmbeddedCompatibilityError("Invalid native core description address");
-  const descriptionBytes = Buffer.from(koffi.decode(borrowed.ptr, "uint8_t", Number(length)) as Uint8Array);
+  const descriptionBytes = Buffer.from(nativeBytes(borrowed.ptr, Number(length)));
   decodeCoreDescription(descriptionBytes, koffi.sizeof("void *"));
   // Core tests guarantee a stable library-owned descriptor address until unload; equal file bytes cannot distinguish separate native registries.
   // 核心测试保证描述地址在卸载前由库拥有且保持稳定。仅比较文件字节无法区分拥有独立传输表的两个模块。
@@ -156,9 +156,7 @@ export function requestEmbeddedNative(identity: bigint, encoded: Buffer, maxResp
     if (status !== EmbeddedNativeStatus.OK) throw new EmbeddedTransportError("luaskills_ffi_embedded_request_v1", status);
     const length = embeddedUnsignedInteger(result.len, "result length");
     if (!result.ptr || result.allocation_id === 0 || result.allocation_id === 0n || length === 0n || length > maxResponseBytes || length > BigInt(bufferConstants.MAX_LENGTH)) throw new Error("Invalid embedded result descriptor");
-    // Copy through Uint8Array; Buffer.from(ArrayBuffer) alone would alias the native allocation.
-    // 经 Uint8Array 复制；仅使用 Buffer.from(ArrayBuffer) 会别名原生分配。
-    responseBytes = Buffer.from(new Uint8Array(koffi.view(result.ptr, Number(length))));
+    responseBytes = Buffer.from(nativeBytes(result.ptr, Number(length)));
     return responseBytes;
   } finally {
     if (result.allocation_id !== 0 && result.allocation_id !== 0n) {

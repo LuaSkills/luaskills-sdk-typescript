@@ -930,7 +930,7 @@ export class LuaSkillsJsonFfi {
     if (!output.ptr || Number(output.len) === 0) {
       return "";
     }
-    return Buffer.from(koffi.view(output.ptr, Number(output.len))).toString("utf8");
+    return Buffer.from(nativeBytes(output.ptr, Number(output.len))).toString("utf8");
   }
 
   /**
@@ -1022,7 +1022,7 @@ export class LuaSkillsJsonFfi {
     if (!input.ptr || Number(input.len) === 0) {
       return null;
     }
-    return JSON.parse(Buffer.from(koffi.view(input.ptr, Number(input.len))).toString("utf8")) as JsonValue;
+    return JSON.parse(Buffer.from(nativeBytes(input.ptr, Number(input.len))).toString("utf8")) as JsonValue;
   }
 
   /**
@@ -1057,6 +1057,16 @@ export class LuaSkillsJsonFfi {
  */
 function serializeProviderJson(value: JsonValue | undefined): Buffer {
   return Buffer.from(JSON.stringify(value ?? null), "utf8");
+}
+
+/**
+ * Copy `length` bytes at one native pointer into JavaScript-owned memory.
+ * 将单个原生指针处的 `length` 字节复制到 JavaScript 自有内存。
+ * koffi.view would wrap the native memory as an external ArrayBuffer, which Electron's V8 memory sandbox rejects with a fatal error.
+ * koffi.view 会将原生内存包装为外部 ArrayBuffer，Electron 的 V8 内存沙箱会以致命错误拒绝。
+ */
+export function nativeBytes(pointer: unknown, length: number): Uint8Array {
+  return koffi.decode(pointer, "uint8_t", length) as Uint8Array;
 }
 
 /**

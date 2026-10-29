@@ -30,6 +30,7 @@ const testFiles = [
   "system-management-raw-call-boundary.mjs",
   "client-lifecycle-boundary.mjs",
   "ffi-envelope-errors.mjs",
+  "native-bytes.mjs",
   "runtime-manifest-errors.mjs",
   "runtime-manifest-host-options.mjs",
   "runtime-archive-validation.mjs",

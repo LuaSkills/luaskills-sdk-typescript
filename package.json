@@ -43,6 +43,7 @@
     "test:runtime-manifest-host-options": "npm run build && node tests/runtime-manifest-host-options.mjs",
     "test:runtime-archive-validation": "npm run build && node tests/runtime-archive-validation.mjs",
     "test:runtime-tar-gz-validation": "npm run build && node tests/runtime-tar-gz-validation.mjs",
+    "test:native-bytes": "npm run build && node tests/native-bytes.mjs",
     "test:runtime-checksum-validation": "npm run build && node tests/runtime-checksum-validation.mjs",
     "test:runtime-managed-path-validation": "npm run build && node tests/runtime-managed-path-validation.mjs",
     "test:embedded-candidate": "node scripts/verify-embedded-candidate.mjs",
