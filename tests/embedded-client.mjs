@@ -349,7 +349,8 @@ test("invalid polling bounds and already-aborted observation submit no commands"
 test("distributed facade declarations preserve generated options, immutable identities and exact handle results", () => {
   const compiler = createRequire(import.meta.url).resolve("typescript/bin/tsc");
   const fixture = fileURLToPath(new URL("./fixtures/embedded-client-consumer.ts", import.meta.url));
-  const result = spawnSync(process.execPath, [compiler, "--strict", "--exactOptionalPropertyTypes", "--noEmit", "--target", "ES2022", "--module", "NodeNext", "--moduleResolution", "NodeNext", fixture], { encoding: "utf8", timeout: 10000 });
+  // A full tsc check takes 3–8 s on hosted macOS Intel runners; the timeout only guards against a hang.
+  const result = spawnSync(process.execPath, [compiler, "--strict", "--exactOptionalPropertyTypes", "--noEmit", "--target", "ES2022", "--module", "NodeNext", "--moduleResolution", "NodeNext", fixture], { encoding: "utf8", timeout: 60000 });
   assert.equal(result.status, 0, `${result.error ?? ""}\n${result.stdout}\n${result.stderr}`);
 });
 
