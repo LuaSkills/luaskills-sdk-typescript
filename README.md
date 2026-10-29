@@ -6,7 +6,7 @@ Main LuaSkills repository: [LuaSkills/luaskills](https://github.com/LuaSkills/lu
 
 TypeScript / Node.js SDK for integrating the LuaSkills runtime through the public JSON FFI surface.
 
-This source targets the `0.6.5` release line; publication and artifact verification follow the release workflow. It retains the strict package-level skill configuration contract and defaults runtime assets to LuaSkills core `v0.7.2`, vldb-controller `v0.2.3`, and vldb-sqlite `v0.1.6`.
+This source targets the `0.6.6` release line; publication and artifact verification follow the release workflow. It retains the strict package-level skill configuration contract and defaults runtime assets to LuaSkills core `v0.7.2`, vldb-controller `v0.2.3`, and vldb-sqlite `v0.1.6`.
 
 The SDK wraps native library loading, JSON FFI buffers, engine lifecycle, formal skill roots, authority-aware management calls, skill config, provider callbacks, host-tool callbacks, and runtime asset installation. Hosts should not need to hand-write low-level FFI buffers or JSON envelopes for normal integration.
 
@@ -100,7 +100,7 @@ Run the example directly with `npm run example:embedded-candidate -- <absolute-c
 
 ## Installation
 
-The 0.6.5 SDK requires Node.js 24 LTS or newer.
+The 0.6.6 SDK requires Node.js 24 LTS or newer.
 
 ```bash
 npm install @luaskills/sdk
