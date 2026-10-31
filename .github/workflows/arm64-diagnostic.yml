@@ -6,6 +6,10 @@ permissions:
 jobs:
   allocator-reproduction:
     runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        allocator: [system, internal]
     steps:
       - uses: actions/checkout@v6
       - name: Install the exact original compiler
@@ -15,7 +19,7 @@ jobs:
           RUSTFLAGS: '-C relocation-model=static -C link-arg=-no-pie'
         run: cargo +1.94.0 build --release --manifest-path scripts/allocator-reproduction/Cargo.toml
       - name: Run without the SDK or core
-        run: scripts/allocator-reproduction/target/release/luajit-address-reproduction
+        run: scripts/allocator-reproduction/target/release/luajit-address-reproduction ${{ matrix.allocator }}
   diagnose:
     runs-on: ubuntu-24.04-arm
     steps:
