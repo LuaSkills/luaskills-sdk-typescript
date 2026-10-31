@@ -39,3 +39,30 @@ jobs:
         run: |
           npm pack --pack-destination . --json > pack-result.json
           node --input-type=module -e "import {readFileSync} from 'node:fs'; import {verifyDistribution} from './scripts/verify-embedded-distribution.mjs'; const result=JSON.parse(readFileSync('pack-result.json','utf8')); if(result.length!==1) throw new Error('Expected one npm artifact'); verifyDistribution(result[0].filename);"
+      # Readiness regressions use the real packed bytes and a frozen shared protocol authority, without publishing.
+      # 就绪回归使用真实打包字节及固定共享协议权威，不执行发布。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: LuaSkills/luaskills
+          ref: 21e2fae1be8f68e5478c2f2339af16b538bf4aa4 # v0.7.4
+          path: .release-core
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Verify bounded registry visibility and unchanged byte gates
+        shell: python
+        run: |
+          import json
+          import pathlib
+          import subprocess
+          import sys
+          # Reuse this job's one verified archive; never repack to satisfy a publication test.
+          # 复用本作业唯一已验证归档；绝不为了满足发布测试重新打包。
+          archive = json.loads(pathlib.Path('pack-result.json').read_text(encoding='utf-8'))[0]['filename']
+          subprocess.run([sys.executable, 'tests/sdk-release-gate.py', '--core-root', '.release-core',
+                          '--archive', archive,
+                          'ReleaseGateTests.test_delayed_registry_visibility_publishes_once_and_checks_exact_bytes',
+                          'ReleaseGateTests.test_readiness_rejects_unrelated_http_errors_without_polling',
+                          'ReleaseGateTests.test_readiness_deadline_caps_each_http_request',
+                          'ReleaseGateTests.test_postpublication_exact_404_preserves_failure_without_second_publish'], check=True)

@@ -30,6 +30,8 @@ candidate-evidence 在全部门禁成功后、任何 npm/GitHub Release 变更�
 
 唯一 publish-or-verify 重新认证原候选、当前意图、源码/version/lock、完整矩阵、GitHub token 写权限及默认树/真实 tag。冷下载官方 npm 精确版本：仅同已测 SHA 才复用；仅精确版本端点 404 才执行一次 npm publish 原 tgz。tarball 404、不同字节、权限/服务未知错误均失败。成功或明确版本竞争后仍需重新下载核对，不能吞任意发布错误。[npm 官方可信发布](https://docs.npmjs.com/trusted-publishers/)
 
+上传成功确认与公共元数据可见是两个独立阶段。npm 明确可能在确认后继续处理数分钟，因此上传成功或已确认的版本竞争后，精确版本元数据 404 会进入最长 600 秒、间隔 5 秒的只读就绪等待；每次请求受剩余预算约束并禁用缓存。预检 404 仍立即决定单次上传。权限、服务错误、其他 URL 的 404、错误身份及 tarball 摘要差异立即失败。超时保留原候选、上传日志及恢复协议，不重复上传、不重新打包，不产生成功证明。普通推送与拉取请求 CI 在三个系统、两个 Node 版本中运行延迟可见、期限、错误来源及原字节验证回归。
+
 随后新目录、新空缓存、空 npmrc、官方 registry 安装准确版本，核对 lock resolved/integrity、实际成员字节并执行包内原生门禁。主 vVERSION Release 只包含完整原 signed candidate：认证完整分页精确 tag/actual ID → draft → 全资产字节复核 → publish。同字节复用、不同拒绝；部分草稿只补原清单缺项；未知旧资产、已公开缺项或真实 tag SHA 不同均拒绝，不 overwrite/delete/clobber。仅初始 exact Git ref 404 代表缺失，嵌套 annotation 404 属于身份未知。服务器 immutable 仅记录，不修改或假定启用。
 
 新 completion 冻结 fresh core/recheck、冷 npm consumer、fresh aggregate、actual main Release ID/tag/source、相同原 package inventory、原 manifest/bundle/attestation/binding 四摘要及 actual candidate observation。官方签名全部主体，发布到独立 recovery-vVERSION-rCOMPLETION_RUN-aCOMPLETION_ATTEMPT。主 Release 绝不追加新证明；completion 失败后的新 attempt 使用新完成链，原候选与主草稿字节不变。公开已成功但回读丢失时，后续从 actual ID/source/全字节复用，不重传或重编辑最终 Release。
@@ -86,4 +88,4 @@ python tests/standalone-examples-package.py -v
 
 离线 tests 使用真实 tgz、真实 ZIP 与公共恢复函数。明确合成的 HTTP/官方进程输出仅检查协议和失败行为，不是实际加密、registry 或五平台证明。覆盖原整轮失败/运行中、准确旧 attempt、缺/过期制品、缺门禁、签名/字节变化、两链 accepted、缺 fresh consumer、跨 attempt 完成重试、部分草稿、公开丢回读和实际六例可重复 ZIP。
 
-本轮未运行正式五平台 workflow、核心正式 registry 消费、npm OIDC 发布、公共 Release 上传或远端 recovery。维护者仍须配置 npm Trusted Publisher 精确绑定仓库/sdk-release.yml/production，以及 GitHub production environment/tag rules；已有只读信息未确认这些账户设置，不能宣称 CI 成功。不使用 PAT、备用账户或管理员修改 immutable 设置。
+0.7.4 已通过正式五平台原生验收，并通过运行 `41185797898` 从原始候选 `41184504980` 完成 npm 冷消费及签名恢复发布；示例发布运行 `41186488644` 成功。此后合入的就绪门禁修复不改写 0.7.4 标签或公开字节。后续版本仍须使用绑定仓库/sdk-release.yml/production 的 npm Trusted Publisher 及对应 GitHub production 配置；本地夹具不能代替下一版本的真实发布验收。

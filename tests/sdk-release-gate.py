@@ -36,6 +36,36 @@ CORE = RELEASE.authority(OPTIONS.core_root)
 RECOVERY, SHARED = RELEASE.recovery_authority(OPTIONS.core_root)
 
 
+class PublicationClock:
+    """Control readiness time without wall-clock sleeps; never replace production verification.
+    控制就绪时间而无需真实等待；不替换生产验证。
+    """
+
+    def __init__(self):
+        """Initialize elapsed time and recorded sleeps; return the deterministic clock.
+        初始化经过时间及等待记录；返回确定性时钟。
+        """
+        # Now advances only through the test's sleep boundary.
+        # 当前时间仅通过测试等待边界推进。
+        self.now = 0.0
+        # Sleeps records every requested interval for exact deadline assertions.
+        # 等待列表记录每个请求间隔，供精确截止时间断言使用。
+        self.sleeps = []
+
+    def monotonic(self):
+        """Return controlled elapsed seconds without advancing time.
+        返回受控经过秒数，不推进时间。
+        """
+        return self.now
+
+    def sleep(self, seconds):
+        """Record seconds and advance time by that amount; return nothing.
+        记录秒数并据此推进时间；无返回值。
+        """
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
 class RecoveryHttp:
     """Serve exact documented read-only attempts and actual ZIP fixtures; reject every undefined URL.
     提供精确文档只读轮次及实际 ZIP 夹具；拒绝每个未定义 URL。
@@ -1227,37 +1257,110 @@ class ReleaseGateTests(unittest.TestCase):
                                                      "--access", "public", "--registry", "https://registry.npmjs.org", "--json"])
         self.assertEqual(RELEASE.read_json(args.output)["action"], "published")
 
-    def test_postpublication_exact_404_preserves_failure_without_second_publish(self):
-        """Preserve the actual second HTTP404 after zero/conflict; record process evidence but no success.
-        在零退出或冲突后保留第二个实际 HTTP404；记录子进程证据而不生成成功。
+    def test_delayed_registry_visibility_publishes_once_and_checks_exact_bytes(self):
+        """Accept delayed visibility only after the original archive bytes match; never upload twice.
+        仅在原始归档字节匹配后接收延迟可见版本；绝不上传两次。
         """
-        # Both original accepted npm decisions must still obey the fresh registry postcondition.
-        # 两种原可接受 npm 判定都必须服从全新注册表后置条件。
+        # Arguments retain the real candidate, aggregate and archive validation.
+        # 参数保留真实候选、汇总和归档校验。
+        args = self.publication_args()
+        for changed in (False, True):
+            with self.subTest(changed=changed):
+                args.output = self.root / f"delayed-publication-{changed}.json"
+                # Clock advances only at metadata polling boundaries.
+                # 时钟仅在元数据轮询边界推进。
+                clock = PublicationClock()
+                # The successful uploader is invoked once even if two later metadata reads are missing.
+                # 即使之后两次元数据读取缺失，成功上传器也仅调用一次。
+                completed = RELEASE.subprocess.CompletedProcess([], 0, b"{}", b"")
+                # Actual archive bytes still determine success after readiness.
+                # 就绪之后仍由真实归档字节决定成功与否。
+                content = b"changed published bytes" if changed else self.archive.read_bytes()
+                # Responses separate initial absence from two post-upload visibility delays.
+                # 响应区分初始缺失与上传后的两次可见性延迟。
+                responses = [self.missing_npm_version(), self.missing_npm_version(), self.missing_npm_version(), self.npm_metadata()]
+                stack, command = self.publication_context(responses, [io.BytesIO(content)], completed)
+                with stack, patch.object(RELEASE.time, "monotonic", clock.monotonic), patch.object(RELEASE.time, "sleep", clock.sleep):
+                    if changed:
+                        with self.assertRaisesRegex(ValueError, "differs from tested"):
+                            RELEASE.publish_or_verify(args)
+                    else:
+                        RELEASE.publish_or_verify(args)
+                command.assert_called_once()
+                self.assertEqual(clock.sleeps, [5, 5])
+                self.assertEqual(args.output.exists(), not changed)
+                if not changed:
+                    self.assertEqual(RELEASE.read_json(args.output)["action"], "published")
+
+    def test_readiness_rejects_unrelated_http_errors_without_polling(self):
+        """Reject permission, server and other-route errors immediately; return no success metadata.
+        立即拒绝权限、服务及其他路由错误；不返回成功元数据。
+        """
+        # Only this exact metadata endpoint can represent pending publication.
+        # 仅此精确元数据端点可以表示发布尚未就绪。
+        url = f"https://registry.npmjs.org/@luaskills%2fsdk/{self.identity['sdk_version']}"
+        for code, endpoint in ((403, url), (503, url), (404, url + "/wrong")):
+            with self.subTest(code=code, endpoint=endpoint):
+                # Error identity remains available to callers while its response stream is closed.
+                # 响应流关闭后，调用方仍可取得原错误身份。
+                error = RELEASE.urllib.error.HTTPError(endpoint, code, "unit failure", {}, io.BytesIO())
+                with patch.object(RELEASE, "request_json", side_effect=error) as request, \
+                        patch.object(RELEASE.time, "sleep") as sleep, self.assertRaises(RELEASE.urllib.error.HTTPError) as caught:
+                    RELEASE.published_registry_metadata(url)
+                self.assertIs(caught.exception, error)
+                request.assert_called_once()
+                sleep.assert_not_called()
+
+    def test_readiness_deadline_caps_each_http_request(self):
+        """Require the final request and sleep to fit the remaining deadline; return no unverified metadata.
+        要求最后一次请求及等待符合剩余截止时间；不返回未验证元数据。
+        """
+        # Clock and endpoint define the entire bounded observation sequence.
+        # 时钟与端点定义完整的有界观测序列。
+        clock = PublicationClock()
+        url = f"https://registry.npmjs.org/@luaskills%2fsdk/{self.identity['sdk_version']}"
+        with patch.object(RELEASE, "request_json", side_effect=[self.missing_npm_version(), self.missing_npm_version()]) as request, \
+                patch.object(RELEASE.time, "monotonic", clock.monotonic), patch.object(RELEASE.time, "sleep", clock.sleep), \
+                patch.object(RELEASE, "PUBLICATION_VISIBILITY_TIMEOUT_SECONDS", 7), \
+                self.assertRaisesRegex(TimeoutError, "not visible within 7s"):
+            RELEASE.published_registry_metadata(url)
+        self.assertEqual(clock.sleeps, [5, 2])
+        self.assertEqual([call.kwargs["timeout"] for call in request.call_args_list], [7, 2])
+
+    def test_postpublication_exact_404_preserves_failure_without_second_publish(self):
+        """Bound pending visibility after zero/conflict; retain diagnostics and never publish a second time.
+        对零退出或冲突后的未就绪状态设置上限；保留诊断且绝不再次上传。
+        """
+        # Both accepted npm outcomes require the same public readiness and byte postcondition.
+        # 两种可接受 npm 结果都要求相同的公共就绪与字节后置条件。
         args = self.publication_args()
         for conflict in (False, True):
             with self.subTest(conflict=conflict):
-                # Keep each output and derived diagnostics distinct and originally nonexistent.
-                # 每份输出及派生诊断保持独立且原先不存在。
-                args.output = self.root / f'postpublication-404-{conflict}.json'
-                # Model only the external npm boundary as in existing publication tests.
-                # 按既有发布测试，仅模拟外部 npm 边界。
+                args.output = self.root / f"postpublication-404-{conflict}.json"
+                # Preserve raw uploader streams even when metadata never becomes visible.
+                # 即使元数据始终不可见，也保留上传器原始输出流。
                 stdout = b'{"error":{"code":"E409","summary":"Conflict"}}' if conflict else b'{}'
                 completed = RELEASE.subprocess.CompletedProcess([], 17 if conflict else 0, stdout, b'observed stderr\r\n')
-                # The second precise endpoint exception must retain its original object identity.
-                # 第二个精确端点异常必须保留原对象身份。
-                second = self.missing_npm_version()
-                stack, command = self.publication_context([self.missing_npm_version(), second], [], completed)
-                with stack, self.assertRaises(RELEASE.urllib.error.HTTPError) as caught:
+                # Two pending reads consume the ten-second test budget without a real sleep.
+                # 两次待就绪读取消耗十秒测试预算，无需真实等待。
+                clock = PublicationClock()
+                stack, command = self.publication_context(
+                    [self.missing_npm_version(), self.missing_npm_version(), self.missing_npm_version()], [], completed)
+                with stack, patch.object(RELEASE.time, "monotonic", clock.monotonic), \
+                        patch.object(RELEASE.time, "sleep", clock.sleep), \
+                        patch.object(RELEASE, "PUBLICATION_VISIBILITY_TIMEOUT_SECONDS", 10), \
+                        self.assertRaisesRegex(TimeoutError, "not visible within 10s"):
                     RELEASE.publish_or_verify(args)
-                self.assertIs(caught.exception, second)
                 command.assert_called_once()
+                self.assertEqual(clock.now, 10)
+                self.assertEqual(clock.sleeps, [5, 5])
                 self.assertFalse(args.output.exists())
-                # The actual diagnostic receipt never asserts publication success or triggers retry.
-                # 实际诊断回执绝不声称发布成功或触发重试。
-                prefix = args.output.with_suffix('.npm')
-                self.assertEqual(Path(str(prefix)+'.stdout.log').read_bytes(), stdout)
-                self.assertEqual(Path(str(prefix)+'.stderr.log').read_bytes(), b'observed stderr\r\n')
-                self.assertEqual(RELEASE.read_json(Path(str(prefix)+'.process.json'))['returncode'], completed.returncode)
+                # The diagnostic receipt records the upload, never a fabricated completed publication.
+                # 诊断回执记录上传，绝不伪造发布完成。
+                prefix = args.output.with_suffix(".npm")
+                self.assertEqual(Path(str(prefix) + ".stdout.log").read_bytes(), stdout)
+                self.assertEqual(Path(str(prefix) + ".stderr.log").read_bytes(), b'observed stderr\r\n')
+                self.assertEqual(RELEASE.read_json(Path(str(prefix) + ".process.json"))["returncode"], completed.returncode)
 
     def test_registry_unknown_or_missing_tarball_never_publishes(self):
         """Reject permission/service states and a broken existing tarball without interpreting them as absence.

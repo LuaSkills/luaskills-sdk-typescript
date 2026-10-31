@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -33,6 +34,12 @@ RELEASE_FILES = {"artifact": "sdk-artifact.json", "aggregate": "sdk-aggregate.js
 # GitHub requires each Release asset to remain below this single shared byte boundary.
 # GitHub 要求每个 Release 资产低于这个单一共享字节边界。
 MAX_RELEASE_ASSET_BYTES = 2 * 1024 * 1024 * 1024
+# Upload acknowledgement precedes public registry processing; bound this separate readiness phase to ten minutes.
+# 上传确认先于公共注册表处理完成；将独立就绪阶段限制为十分钟。
+PUBLICATION_VISIBILITY_TIMEOUT_SECONDS = 600
+# Poll only the exact version metadata, without repeating any upload or weakening byte verification.
+# 仅轮询精确版本元数据，不重复上传，也不降低字节校验要求。
+PUBLICATION_VISIBILITY_POLL_SECONDS = 5
 # Candidate and completion subjects remain physically separate; the main release receives only candidate bytes.
 # 候选及完成主体物理分离；主 Release 仅接收候选字节。
 SDK_WORKFLOW = ".github/workflows/sdk-release.yml"
@@ -618,20 +625,60 @@ def aggregate(args):
                            "prerequisites_sha256": digest(args.prerequisites), "complete": True})
 
 
-def request_json(url):
+def request_json(url, *, timeout=60):
     """Read JSON from the explicit official npm URL; return its object or fail visibly.
     从显式官方 npm URL 读取 JSON；返回对象或明确失败。
+    timeout limits this single request in seconds and may be shortened by a publication deadline.
+    timeout 以秒限制单次请求，可由发布截止时间进一步缩短。
     """
     require(url.startswith("https://registry.npmjs.org/"), "Official npm registry required")
-    with urllib.request.urlopen(url, timeout=60) as response:
+    # A bounded caller deadline may shorten the HTTP timeout; bypass stale negative-cache responses.
+    # 调用方的有界截止时间可以缩短 HTTP 超时；请求绕过陈旧的否定缓存响应。
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"Cache-Control": "no-cache"}), timeout=timeout) as response:
         return json.loads(response.read(), object_pairs_hook=pairs)
 
 
-def registry_package(identity, directory):
+def published_registry_metadata(version_url):
+    """Wait for the exact acknowledged version URL; return its metadata or fail at the readiness deadline.
+    等待已确认上传的精确版本 URL；返回元数据，或在就绪截止时间到达时失败。
+    Only that URL's HTTP 404 denotes pending visibility; authorization, service and malformed responses fail immediately.
+    仅该 URL 的 HTTP 404 表示尚未可见；权限、服务及格式错误立即失败。
+    """
+    # Deadline applies only to metadata visibility; normal archive verification follows unchanged.
+    # 截止时间仅约束元数据可见性；之后仍执行原有归档验证。
+    deadline = time.monotonic() + PUBLICATION_VISIBILITY_TIMEOUT_SECONDS
+    while True:
+        # Remaining time also caps each request, so a slow endpoint cannot extend the readiness deadline.
+        # 剩余时间同时限制每次请求，避免慢端点延长就绪截止时间。
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"Published npm version is not visible within {PUBLICATION_VISIBILITY_TIMEOUT_SECONDS}s: {version_url}; retain the original candidate and recover without repacking")
+        try:
+            return request_json(version_url, timeout=min(60, remaining))
+        except urllib.error.HTTPError as error:
+            # A tarball 404 or another route/status is never a pending version response.
+            # tarball 的 404 或其他路由、状态绝不视为版本尚未就绪。
+            pending = error.code == 404 and error.url == version_url
+            error.close()
+            if not pending:
+                raise
+        # Sleep only inside the remaining budget; no upload operation is reachable from this loop.
+        # 仅在剩余预算内等待；此循环无法执行任何上传操作。
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(PUBLICATION_VISIBILITY_POLL_SECONDS, remaining))
+
+
+def registry_package(identity, directory, *, wait_for_publication=False):
     """Download the exact official npm version and require the tested tgz digest; return metadata.
     下载精确官方 npm 版本并要求被测 tgz 摘要；返回元数据。
+    identity names the tested package, directory owns downloaded bytes, and wait_for_publication follows an acknowledged upload.
+    identity 标识被测包，directory 拥有下载字节，wait_for_publication 用于已确认上传后的阶段。
     """
-    metadata = request_json(f"https://registry.npmjs.org/@luaskills%2fsdk/{identity['sdk_version']}")
+    # Preflight absence remains immediate; only a confirmed upload or documented version race enters readiness.
+    # 预检缺失仍立即返回；仅已确认上传或已定义版本竞争进入就绪等待。
+    version_url = f"https://registry.npmjs.org/@luaskills%2fsdk/{identity['sdk_version']}"
+    metadata = published_registry_metadata(version_url) if wait_for_publication else request_json(version_url)
     require(metadata["name"] == "@luaskills/sdk" and metadata["version"] == identity["sdk_version"], "Registry package/version mismatch")
     url = metadata["dist"]["tarball"]
     require(url.startswith("https://registry.npmjs.org/@luaskills/sdk/-/"), "Unexpected registry tarball origin")
@@ -785,7 +832,7 @@ def publish_or_verify(args):
             race = npm_publish_archive(archive, identity["sdk_version"], log_prefix=log_prefix)
             # A zero exit or known race is still not success until a fresh official download matches the tested bytes.
             # 零退出码或已知竞争仍不是成功，必须新下载官方字节并匹配被测归档。
-            metadata = registry_package(identity, directory)
+            metadata = registry_package(identity, directory, wait_for_publication=True)
             action = "race-reused" if race else "published"
     write_json(args.output, {"schema_version": SDK_SCHEMA, "artifact": identity, "action": action,
                             "aggregate_sha256": digest(args.aggregate), "prerequisites_sha256": digest(args.prerequisites),
