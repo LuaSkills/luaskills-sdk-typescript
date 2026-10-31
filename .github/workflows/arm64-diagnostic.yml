@@ -39,7 +39,9 @@ jobs:
           cp scripts/arm64-release-diagnostic.mjs consumer/diagnostic.mjs
           cd consumer
           for mode in embedded sqlite combined; do
-            gdb -batch -ex run -ex 'thread apply all bt' -ex 'info registers' --args node diagnostic.mjs "$mode" > "$mode.log" 2>&1
+            # A normally exited inferior has no registers; collect all modes without requesting them.
+            # 正常退出的被调试进程没有寄存器；不请求寄存器，以便收集全部模式。
+            gdb -batch -ex run -ex 'thread apply all bt' --args node diagnostic.mjs "$mode" > "$mode.log" 2>&1
             cat "$mode.log"
           done
       - uses: actions/upload-artifact@v4
