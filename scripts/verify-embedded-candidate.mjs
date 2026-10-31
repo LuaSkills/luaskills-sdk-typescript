@@ -102,6 +102,7 @@ import {fileURLToPath} from 'node:url';
 import * as sdk from '@luaskills/sdk';
 import {runEmbeddedCandidate} from './node_modules/@luaskills/sdk/examples/embedded-candidate.mjs';
 import {runEmbeddedValuePolicy} from './node_modules/@luaskills/sdk/examples/embedded-value-policy.mjs';
+import {main as runSQLiteDemo} from './node_modules/@luaskills/sdk/examples/sqlite-demo.mjs';
 assert.equal(fileURLToPath(import.meta.resolve('@luaskills/sdk')), process.argv[4]);
 // Contract bytes come only from the independent installed artifact.
 // 契约字节仅来自独立安装产物。
@@ -113,6 +114,9 @@ const result=await runEmbeddedCandidate(process.argv[2],readFileSync(process.arg
 // Policy acceptance runs only the independent installed module and preserves the original result schema.
 // 政策验收仅运行独立安装模块，并保留原结果结构。
 await runEmbeddedValuePolicy(process.argv[2],readFileSync(process.argv[3]));
+// SQLite acceptance uses the installed demo, including bound values, rollback and a reopened engine.
+// SQLite 验收使用已安装示例，覆盖参数绑定、回滚及重新打开的引擎。
+runSQLiteDemo();
 process.stdout.write(JSON.stringify(result)+'\\n');
 `);
     // One bounded child executes actual installed code and propagates every native failure.

@@ -840,6 +840,10 @@ def registry_consumer(args):
         sdk = installed_bytes(identity, consumer / identity["archive"], consumer, metadata["dist"])
         stdout = run(["node", sdk / "examples/embedded-candidate.mjs", library, description], consumer, environment)
         result = parse_native(stdout, decoded)
+        # The official registry package must also execute its own SQLite demo against the selected core.
+        # 正式注册表包还必须对所选核心执行自身随附的 SQLite 示例。
+        print(run(["node", sdk / "examples/provider-callback.mjs"], consumer,
+                  dict(environment, LUASKILLS_LIB=str(library))))
     write_json(args.output, {"schema_version": SDK_SCHEMA, "artifact": identity, "platform": args.platform,
                            "registry": {"name": "@luaskills/sdk", "version": identity["sdk_version"],
                                         "tarball": metadata["dist"]["tarball"], "integrity": metadata["dist"]["integrity"],
