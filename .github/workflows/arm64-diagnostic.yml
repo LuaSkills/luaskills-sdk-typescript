@@ -44,6 +44,10 @@ jobs:
             gdb -batch -ex run -ex 'thread apply all bt' --args node diagnostic.mjs "$mode" > "$mode.log" 2>&1
             cat "$mode.log"
           done
+          # Only the crashing combination has a live register set; preserve allocator addresses and instructions.
+          # 仅崩溃组合保留活动寄存器；保存分配地址和指令证据。
+          gdb -batch -ex run -ex 'info registers' -ex 'x/16i $pc-32' -ex 'info proc mappings' --args node diagnostic.mjs combined > combined-registers.log 2>&1
+          cat combined-registers.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
