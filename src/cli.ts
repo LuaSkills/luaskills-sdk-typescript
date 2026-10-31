@@ -83,16 +83,10 @@ function runtimeInstallOptionsFromArgs(parsed: ParsedArgs, runtimeRoot: string):
     database: normalizeDatabasePreset((stringFlag(parsed, "database") as RuntimeDatabasePreset | undefined) ?? RuntimeDatabasePreset.None),
     luaskillsVersion: stringFlag(parsed, "luaskills-version"),
     luaRuntimeVersion: stringFlag(parsed, "lua-runtime-version"),
-    vldbControllerVersion: stringFlag(parsed, "vldb-controller-version"),
-    vldbSqliteVersion: stringFlag(parsed, "vldb-sqlite-version"),
-    vldbLancedbVersion: stringFlag(parsed, "vldb-lancedb-version"),
     includeLuaSkillsFfi: !booleanFlag(parsed, "skip-luaskills-ffi"),
     includeLuaRuntime: !booleanFlag(parsed, "skip-lua-runtime"),
     luaskillsRepo: stringFlag(parsed, "luaskills-repo"),
     luaRuntimeRepo: stringFlag(parsed, "lua-runtime-repo"),
-    vldbControllerRepo: stringFlag(parsed, "vldb-controller-repo"),
-    vldbSqliteRepo: stringFlag(parsed, "vldb-sqlite-repo"),
-    vldbLancedbRepo: stringFlag(parsed, "vldb-lancedb-repo"),
     managedRuntimes: normalizeManagedRuntimeTarget(stringFlag(parsed, "managed-runtimes")),
     managedPythonVersion: stringFlag(parsed, "managed-python-version"),
     managedUvVersion: stringFlag(parsed, "managed-uv-version"),
@@ -175,7 +169,6 @@ async function dispatchEngineCommand(
         client.skills.uninstall(
           skillRoots,
           requireValue(first, "uninstall requires <skill-id>"),
-          uninstallOptionsFromArgs(parsed),
           lifecycleOptionsFromArgs(parsed, skillRoots),
         ),
       );
@@ -197,7 +190,6 @@ async function dispatchEngineCommand(
         client.system(authority).uninstall(
           skillRoots,
           requireValue(first, "system-uninstall requires <skill-id>"),
-          uninstallOptionsFromArgs(parsed),
           lifecycleOptionsFromArgs(parsed, skillRoots),
         ),
       );
@@ -376,16 +368,6 @@ function lifecycleOptionsFromArgs(parsed: ParsedArgs, skillRoots: RuntimeSkillRo
   };
 }
 
-/**
- * Build uninstall cleanup options from CLI flags.
- * 从 CLI 标志构造卸载清理选项。
- */
-function uninstallOptionsFromArgs(parsed: ParsedArgs): { remove_sqlite: boolean; remove_lancedb: boolean } {
-  return {
-    remove_sqlite: booleanFlag(parsed, "remove-sqlite"),
-    remove_lancedb: booleanFlag(parsed, "remove-lancedb"),
-  };
-}
 
 /**
  * Return one string flag value when present.
@@ -529,7 +511,7 @@ function printUsage(): void {
 Commands:
   version
   describe
-  install-runtime [--database none|vldb-controller|vldb-direct|host-callback]
+  install-runtime [--database none|host-callback]
   load | reload | list
   help-list | help-detail <skill-id> [flow]
   is-skill <tool-name> | skill-name <tool-name>
@@ -546,7 +528,7 @@ Commands:
   config refresh [skills|system-skills]
   config events [--after-sequence sequence] [--limit count]
   install|update <source> [--skill-id id] [--target-root USER]
-  uninstall <skill-id> [--target-root USER] [--remove-sqlite] [--remove-lancedb]
+  uninstall <skill-id> [--target-root USER]
   system-install|system-update|system-uninstall ... [--authority system]
   system-enable|system-disable <skill-id> [--authority system]
 

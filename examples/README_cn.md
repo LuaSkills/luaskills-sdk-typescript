@@ -58,7 +58,7 @@ node .\examples\lifecycle.mjs
 node .\examples\runtime-lease.mjs
 ```
 
-`provider-callback.mjs` 演示在 engine 创建前注册 JSON SQLite provider callback。
+`provider_callback`（TypeScript 为 `provider-callback.mjs`）执行真实 SQLite 接入验证：建表、参数化写入、事务回滚、查询和重建引擎后的持久化。数据仅由宿主创建，输出保留的数据库路径。
 
 ```powershell
 node .\examples\provider-callback.mjs
@@ -75,3 +75,5 @@ node .\examples\provider-callback.mjs
 仓库工作流 **Examples Release** 会在匹配的 npm 包发布后生成 `luaskills-sdk-typescript-examples-{VERSION}.zip`。工作流会从 npm 安装 `@luaskills/sdk@{VERSION}` 并运行示例，通过后再上传资产。
 
 release tag 使用 `examples-v{VERSION}`，因此示例资产与 SDK 包版本保持分离。
+
+SQLite 示例支持通过 `LUASKILLS_LIB` 指定已安装的核心动态库；Python 使用标准库，TypeScript 需要 Node.js 24+。

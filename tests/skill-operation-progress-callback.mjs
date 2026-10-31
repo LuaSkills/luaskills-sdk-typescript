@@ -45,11 +45,6 @@ assert.deepEqual(calls, [
     callback: null,
   },
   {
-    kind: "lancedb",
-    functionName: "luaskills_ffi_set_lancedb_provider_json_callback",
-    callback: null,
-  },
-  {
     kind: "host-tool",
     functionName: "luaskills_ffi_set_host_tool_json_callback",
     callback: null,

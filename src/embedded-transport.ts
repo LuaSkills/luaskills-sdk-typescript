@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { EMBEDDED_CONTROL_WORKERS } from "./embedded-worker-protocol.js";
 import koffi from "koffi";
 import { nativeBytes, resolveLibraryPath } from "./ffi.js";
+import { retainSqliteScope } from "./sqlite-lifetime.js";
 import { EMBEDDED_DESCRIPTION_MAX_BYTES, EMBEDDED_PROTOCOL_VERSION, EmbeddedNativeStatus, type EmbeddedInteger, type EmbeddedJsonValue, type InputCommand, type OutputCoreDescription } from "./embedded-contract.js";
 import { decodeCoreDescription, EmbeddedCompatibilityError } from "./embedded-compatibility.js";
 import { decodeEmbeddedJson, embeddedUnsignedInteger, encodeEmbeddedJson } from "./embedded-json.js";
@@ -267,6 +268,9 @@ export function decodeEmbeddedResponse(bytes: Uint8Array): EmbeddedJsonValue {
  * 一个正式传输的同步底层所有者；异步宿主必须在事件循环之外驱动它。
  */
 export class EmbeddedTransport {
+  /** Releases captured SQLite callbacks after successful native transport destruction.
+   * 在原生传输成功销毁后释放已捕获 SQLite 回调。 */
+  private releaseSqliteScope!: () => void;
   /** Resolved authoritative library path, retained for diagnostics.
    * 已解析的权威动态库路径，保留用于诊断。 */
   readonly #libraryPath: string;
@@ -347,11 +351,12 @@ export class EmbeddedTransport {
     this.nativeResultFree = native.resultFree;
     this.nativeRequest = native.request;
     const output: Array<number | bigint> = [0n];
+    this.releaseSqliteScope = retainSqliteScope(this.libraryPath);
     LIVE_TRANSPORTS.add(this);
     // A thrown binding error may follow publication; retain the library unless native rejection proves no owner.
     // 绑定异常可能发生在发布之后；除非原生拒绝证明没有所有者，否则保留动态库。
     const status = this.nativeNew({ struct_size: koffi.sizeof(CONFIG_TYPE), protocol_version: EMBEDDED_PROTOCOL_VERSION, ...this.budgets }, output);
-    if (status !== EmbeddedNativeStatus.OK) { LIVE_TRANSPORTS.delete(this); this.check("luaskills_ffi_embedded_transport_new_v1", status); }
+    if (status !== EmbeddedNativeStatus.OK) { this.releaseSqliteScope(); LIVE_TRANSPORTS.delete(this); this.check("luaskills_ffi_embedded_transport_new_v1", status); }
     const published = embeddedUnsignedInteger(output[0], "transport_id");
     if (published === 0n) throw new Error("Native transport returned a zero identity");
     this.identity = published;
@@ -438,6 +443,7 @@ export class EmbeddedTransport {
       this.check("luaskills_ffi_embedded_transport_free_v1", this.nativeFree(identity));
       this.identity = null;
       LIVE_TRANSPORTS.delete(this);
+      this.releaseSqliteScope();
     } finally { this.activeCalls -= 1; }
   }
 

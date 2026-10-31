@@ -1,24 +1,24 @@
 ﻿param(
-    [ValidateSet("all", "lua", "vldb", "vldb-controller", "vldb-direct")]
+    [ValidateSet("all", "lua")]
     [string]$Target = "all",
-    [ValidateSet("none", "vldb-controller", "vldb-direct", "host-callback")]
-    [string]$Database = "vldb-controller",
     [string]$RuntimeRoot = "output",
     [string]$LuaRuntimeRepo = "LuaSkills/luaskills-packages",
     [string]$LuaRuntimeSeries = "0.1",
     [string]$LuaRuntimeVersion = "",
-    [string]$VldbControllerRepo = "OpenVulcan/vldb-controller",
-    [string]$VldbControllerVersion = "v0.2.3",
-    [string]$VldbSQLiteRepo = "OpenVulcan/vldb-sqlite",
-    [string]$VldbSQLiteVersion = "v0.1.6",
-    [string]$VldbLanceDBRepo = "OpenVulcan/vldb-lancedb",
-    [string]$VldbLanceDBVersion = "v0.1.5",
     [switch]$LuaPackagesOnly,
     [switch]$SkipLuaRuntimeLibs,
     [switch]$DevCache
 )
 
 $ErrorActionPreference = "Stop"
+
+# Dedicated failure type emitted only when a resolved GitHub Release lacks the requested asset.
+# 仅在已解析的 GitHub Release 缺少所请求资产时发出的专用失败类型。
+class ReleaseAssetNotFoundException : System.Exception {
+    # Create one classified missing-asset failure with the supplied diagnostic message.
+    # 使用给定诊断消息创建一个已分类的资产缺失失败。
+    ReleaseAssetNotFoundException([string]$Message) : base($Message) {}
+}
 
 function Resolve-ProjectRoot {
     <#
@@ -76,9 +76,6 @@ $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($PSCommandPath) { Spli
 # ProjectRoot points at the repository root regardless of the caller location.
 # ProjectRoot 指向仓库根目录，避免调用方当前位置影响路径解析。
 $ProjectRoot = Resolve-ProjectRoot -ScriptDirectory $ScriptDir
-if (-not $ProjectRoot) {
-    $ProjectRoot = (Resolve-Path -LiteralPath (Get-Location).Path).Path
-}
 Set-Location $ProjectRoot
 
 function Ensure-Dir {
@@ -130,38 +127,6 @@ function Get-PlatformKey {
     throw "Unsupported operating system."
 }
 
-function Get-VldbAssetInfo {
-    <#
-    .SYNOPSIS
-    Resolve VLDB asset metadata for the current platform.
-    解析当前平台的 VLDB 资产元数据。
-
-    .OUTPUTS
-    Hashtable containing target, archive_ext, binary_name, and dynamic library names.
-    包含 target、archive_ext、binary_name 与动态库名称的哈希表。
-    #>
-    $Arch = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant()
-    switch ($Arch) {
-        "x64" { $ArchKey = "x86_64" }
-        "arm64" { $ArchKey = "aarch64" }
-        default { throw "Unsupported architecture for vldb-controller: $Arch" }
-    }
-
-    if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
-        if ($ArchKey -ne "x86_64") {
-            throw "vldb-controller currently supports Windows x86_64 only."
-        }
-        return @{ target = "x86_64-pc-windows-msvc"; archive_ext = ".zip"; binary_name = "vldb-controller.exe"; dynamic_ext = ".dll"; sqlite_library = "vldb_sqlite.dll"; lancedb_library = "vldb_lancedb.dll" }
-    }
-    if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX)) {
-        return @{ target = "$ArchKey-apple-darwin"; archive_ext = ".tar.gz"; binary_name = "vldb-controller"; dynamic_ext = ".dylib"; sqlite_library = "libvldb_sqlite.dylib"; lancedb_library = "libvldb_lancedb.dylib" }
-    }
-    if ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Linux)) {
-        return @{ target = "$ArchKey-unknown-linux-gnu"; archive_ext = ".tar.gz"; binary_name = "vldb-controller"; dynamic_ext = ".so"; sqlite_library = "libvldb_sqlite.so"; lancedb_library = "libvldb_lancedb.so" }
-    }
-    throw "Unsupported operating system for vldb-controller."
-}
-
 function Get-ReleaseAssetInfo {
     <#
     .SYNOPSIS
@@ -191,7 +156,9 @@ function Get-ReleaseAssetInfo {
     $Asset = $Release.assets | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
     if (-not $Asset) {
         $Available = ($Release.assets | ForEach-Object { $_.name }) -join ", "
-        throw "Asset '$AssetName' not found in $Repo@$Tag. Available: $Available"
+        throw [ReleaseAssetNotFoundException]::new(
+            "Asset '$AssetName' not found in $Repo@$Tag. Available: $Available"
+        )
     }
     return [PSCustomObject]@{
         Url = $Asset.browser_download_url
@@ -243,28 +210,31 @@ function Resolve-ReleaseTagForSeries {
 
     $ApiUrl = "https://api.github.com/repos/$Repo/releases?per_page=100"
     $Releases = Invoke-RestMethod -Uri $ApiUrl -UseBasicParsing
-    $Matches = @()
-    foreach ($Release in $Releases) {
-        if ($Release.draft -or $Release.prerelease) {
-            continue
+    # Matches collects eligible releases in one array materialization to avoid repeated array growth.
+    # Matches 通过一次数组物化收集符合条件的 release，避免反复扩展数组。
+    $Matches = @(
+        foreach ($Release in $Releases) {
+            if ($Release.draft -or $Release.prerelease) {
+                continue
+            }
+            $TagName = [string]$Release.tag_name
+            try {
+                $Version = Convert-TagToSemVer -Tag $TagName
+            } catch {
+                continue
+            }
+            $ReleaseSeries = "$($Version.Major).$($Version.Minor)"
+            if ($ReleaseSeries -ne $Series) {
+                continue
+            }
+            [PSCustomObject]@{
+                Tag = $TagName
+                Version = $Version
+            }
         }
-        $TagName = [string]$Release.tag_name
-        try {
-            $Version = Convert-TagToSemVer -Tag $TagName
-        } catch {
-            continue
-        }
-        $ReleaseSeries = "$($Version.Major).$($Version.Minor)"
-        if ($ReleaseSeries -ne $Series) {
-            continue
-        }
-        $Matches += [PSCustomObject]@{
-            Tag = $TagName
-            Version = $Version
-        }
-    }
+    )
 
-    if (-not $Matches -or $Matches.Count -eq 0) {
+    if ($Matches.Count -eq 0) {
         throw "No published release found for $Repo series $Series"
     }
 
@@ -439,7 +409,7 @@ function Install-LuaRuntime {
     try {
         try {
             Save-ReleaseAssetWithDigest -Repo $LuaRuntimeRepo -Tag $ResolvedLuaRuntimeTag -AssetName $AssetName -Destination $ArchivePath
-        } catch {
+        } catch [ReleaseAssetNotFoundException] {
             if (Test-ExistingRuntimeContent -RuntimeRootPath $RuntimeRootPath) {
                 Write-Warning "Lua runtime packages asset '$AssetName' was not found in $LuaRuntimeRepo@$ResolvedLuaRuntimeTag. Existing packaged runtime content will be used."
                 return
@@ -447,6 +417,25 @@ function Install-LuaRuntime {
             throw
         }
         Expand-ArchiveSmart -ArchivePath $ArchivePath -Destination $ExtractDir
+
+        # Required extracted package directory validated before any existing runtime content is mutated.
+        # 在修改任何现有运行时内容之前校验必需的解压包目录。
+        $ExtractedLuaPackages = Join-Path $ExtractDir "lua_packages"
+        if (-not (Test-Path -LiteralPath $ExtractedLuaPackages -PathType Container)) {
+            throw "Downloaded $AssetName does not contain lua_packages"
+        }
+        if (-not $LuaPackagesOnly) {
+            # Required source manifests that cannot be satisfied by stale files in the destination.
+            # 不能由目标中陈旧文件满足的必需源清单。
+            $ExtractedRuntimeManifest = Join-Path $ExtractDir "resources\lua-runtime-manifest.json"
+            $ExtractedPackagesManifest = Join-Path $ExtractDir "resources\luaskills-packages-manifest.json"
+            if (-not (Test-Path -LiteralPath $ExtractedRuntimeManifest -PathType Leaf)) {
+                throw "Downloaded $AssetName does not contain resources/lua-runtime-manifest.json"
+            }
+            if (-not (Test-Path -LiteralPath $ExtractedPackagesManifest -PathType Leaf)) {
+                throw "Downloaded $AssetName does not contain resources/luaskills-packages-manifest.json"
+            }
+        }
 
         if ($LuaPackagesOnly) {
             $RuntimeDirNames = @("lua_packages")
@@ -460,7 +449,7 @@ function Install-LuaRuntime {
             $Source = Join-Path $ExtractDir $DirName
             if (Test-Path -LiteralPath $Source) {
                 Ensure-Dir (Join-Path $RuntimeRootPath $DirName)
-                Copy-Item -Recurse -Force -Path (Join-Path $Source "*") -Destination (Join-Path $RuntimeRootPath $DirName) -ErrorAction SilentlyContinue
+                Copy-Item -Recurse -Force -Path (Join-Path $Source "*") -Destination (Join-Path $RuntimeRootPath $DirName) -ErrorAction Stop
             }
         }
 
@@ -469,182 +458,16 @@ function Install-LuaRuntime {
             if (Test-Path -LiteralPath $LicenseSource) {
                 $LicenseDest = Join-Path $RuntimeRootPath "licenses"
                 Ensure-Dir $LicenseDest
-                Copy-Item -Recurse -Force -Path (Join-Path $LicenseSource "*") -Destination $LicenseDest -ErrorAction SilentlyContinue
+                Copy-Item -Recurse -Force -Path (Join-Path $LicenseSource "*") -Destination $LicenseDest -ErrorAction Stop
             }
 
-            $RuntimeManifestPath = Join-Path $RuntimeRootPath "resources\lua-runtime-manifest.json"
-            $PackagesManifestPath = Join-Path $RuntimeRootPath "resources\luaskills-packages-manifest.json"
-            if (-not (Test-Path -LiteralPath $RuntimeManifestPath)) {
-                throw "Lua runtime manifest was not found after installing $AssetName"
-            }
-            if (-not (Test-Path -LiteralPath $PackagesManifestPath)) {
-                throw "LuaSkills packages manifest was not found after installing $AssetName"
-            }
         }
     } finally {
         Remove-Item -LiteralPath $TempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-}
-
-function Install-VldbController {
-    <#
-    .SYNOPSIS
-    Download and install vldb-controller into the demo runtime bin directory.
-    下载 vldb-controller 并安装到 demo 运行期 bin 目录。
-
-    .PARAMETER RuntimeRootPath
-    Runtime root that receives bin/vldb-controller.
-    接收 bin/vldb-controller 的运行根目录。
-    #>
-    param([string]$RuntimeRootPath)
-
-    $AssetInfo = Get-VldbAssetInfo
-    $AssetName = "vldb-controller-$VldbControllerVersion-$($AssetInfo.target)$($AssetInfo.archive_ext)"
-    $TempDir = Join-Path $env:TEMP "luaskills_vldb_$PID"
-    $ArchivePath = Join-Path $TempDir $AssetName
-    $ExtractDir = Join-Path $TempDir "extract"
-
-    if (Test-Path -LiteralPath $TempDir) {
-        Remove-Item -LiteralPath $TempDir -Recurse -Force
-    }
-    Ensure-Dir $TempDir
-
-    try {
-        Save-ReleaseAssetWithDigest -Repo $VldbControllerRepo -Tag $VldbControllerVersion -AssetName $AssetName -Destination $ArchivePath
-        Expand-ArchiveSmart -ArchivePath $ArchivePath -Destination $ExtractDir
-
-        $Binary = Get-ChildItem -Recurse -File -Path $ExtractDir -Filter $AssetInfo.binary_name | Select-Object -First 1
-        if (-not $Binary) {
-            throw "vldb-controller binary not found in $AssetName"
-        }
-
-        $RuntimeBin = Join-Path $RuntimeRootPath "bin"
-        Ensure-Dir $RuntimeBin
-        Copy-Item -Force -LiteralPath $Binary.FullName -Destination (Join-Path $RuntimeBin $AssetInfo.binary_name)
-
-        if ($DevCache) {
-            $DevBin = Join-Path $ProjectRoot "third_party\vldb_controller\bin"
-            Ensure-Dir $DevBin
-            Copy-Item -Force -LiteralPath $Binary.FullName -Destination (Join-Path $DevBin $AssetInfo.binary_name)
-        }
-
-        $LicenseDest = Join-Path $RuntimeRootPath "licenses\vldb-controller"
-        Ensure-Dir $LicenseDest
-        [ordered]@{
-            schema_version = 1
-            name = "vldb-controller"
-            version = $VldbControllerVersion
-            asset = $AssetName
-            installed_binary = "bin/$($AssetInfo.binary_name)"
-        } | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $RuntimeRootPath "resources\vldb-controller-manifest.json") -Encoding UTF8
-    } finally {
-        Remove-Item -LiteralPath $TempDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Install-VldbLibraryAsset {
-    <#
-    .SYNOPSIS
-    Download and install one VLDB dynamic library asset.
-    下载并安装单个 VLDB 动态库资产。
-
-    .PARAMETER RuntimeRootPath
-    Runtime root that receives libs content.
-    接收 libs 内容的运行根目录。
-
-    .PARAMETER Repo
-    GitHub repository in owner/name form.
-    owner/name 形式的 GitHub 仓库。
-
-    .PARAMETER Version
-    Release tag name.
-    Release 标签名。
-
-    .PARAMETER Prefix
-    Release asset prefix such as vldb-sqlite-lib.
-    发布资产前缀，例如 vldb-sqlite-lib。
-
-    .PARAMETER NameHint
-    Lowercase library name hint used for recursive lookup.
-    递归查找动态库时使用的小写名称提示。
-    #>
-    param(
-        [string]$RuntimeRootPath,
-        [string]$Repo,
-        [string]$Version,
-        [string]$Prefix,
-        [string]$NameHint
-    )
-
-    $AssetInfo = Get-VldbAssetInfo
-    $AssetName = "$Prefix-$Version-$($AssetInfo.target)$($AssetInfo.archive_ext)"
-    $TempDir = Join-Path $env:TEMP "luaskills_$($Prefix)_$PID"
-    $ArchivePath = Join-Path $TempDir $AssetName
-    $ExtractDir = Join-Path $TempDir "extract"
-
-    if (Test-Path -LiteralPath $TempDir) {
-        Remove-Item -LiteralPath $TempDir -Recurse -Force
-    }
-    Ensure-Dir $TempDir
-
-    try {
-        Save-ReleaseAssetWithDigest -Repo $Repo -Tag $Version -AssetName $AssetName -Destination $ArchivePath
-        Expand-ArchiveSmart -ArchivePath $ArchivePath -Destination $ExtractDir
-
-        $Library = Get-ChildItem -Recurse -File -Path $ExtractDir | Where-Object {
-            $_.Name.ToLowerInvariant().Contains($NameHint) -and $_.Name.EndsWith($AssetInfo.dynamic_ext, [System.StringComparison]::OrdinalIgnoreCase)
-        } | Select-Object -First 1
-        if (-not $Library) {
-            throw "VLDB dynamic library matching '$NameHint' not found in $AssetName"
-        }
-
-        $RuntimeLibs = Join-Path $RuntimeRootPath "libs"
-        Ensure-Dir $RuntimeLibs
-        Copy-Item -Force -LiteralPath $Library.FullName -Destination (Join-Path $RuntimeLibs $Library.Name)
-        return [ordered]@{
-            asset = $AssetName
-            installed_path = "libs/$($Library.Name)"
-        }
-    } finally {
-        Remove-Item -LiteralPath $TempDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Install-VldbDirectLibraries {
-    <#
-    .SYNOPSIS
-    Download and install vldb-sqlite-lib and vldb-lancedb-lib assets.
-    下载并安装 vldb-sqlite-lib 与 vldb-lancedb-lib 资产。
-
-    .PARAMETER RuntimeRootPath
-    Runtime root that receives libs content.
-    接收 libs 内容的运行根目录。
-    #>
-    param([string]$RuntimeRootPath)
-
-    $SQLite = Install-VldbLibraryAsset -RuntimeRootPath $RuntimeRootPath -Repo $VldbSQLiteRepo -Version $VldbSQLiteVersion -Prefix "vldb-sqlite-lib" -NameHint "sqlite"
-    $LanceDB = Install-VldbLibraryAsset -RuntimeRootPath $RuntimeRootPath -Repo $VldbLanceDBRepo -Version $VldbLanceDBVersion -Prefix "vldb-lancedb-lib" -NameHint "lancedb"
-    [ordered]@{
-        schema_version = 1
-        database_mode = "vldb-direct"
-        sqlite = $SQLite
-        lancedb = $LanceDB
-    } | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $RuntimeRootPath "resources\vldb-direct-manifest.json") -Encoding UTF8
 }
 
 Ensure-Dir $RuntimeRoot
 Ensure-Dir (Join-Path $RuntimeRoot "resources")
-
-if ($Target -eq "all" -or $Target -eq "lua") {
-    Install-LuaRuntime -RuntimeRootPath $RuntimeRoot -SkipRuntimeLibraries:$SkipLuaRuntimeLibs -LuaPackagesOnly:$LuaPackagesOnly
-}
-
-if (($Target -eq "all" -and $Database -eq "vldb-controller") -or ($Target -eq "vldb" -and $Database -eq "vldb-controller") -or $Target -eq "vldb-controller") {
-    Install-VldbController -RuntimeRootPath $RuntimeRoot
-}
-
-if (($Target -eq "all" -and $Database -eq "vldb-direct") -or ($Target -eq "vldb" -and $Database -eq "vldb-direct") -or $Target -eq "vldb-direct") {
-    Install-VldbDirectLibraries -RuntimeRootPath $RuntimeRoot
-}
-
-Write-Host "Runtime dependency target '$Target' with database preset '$Database' installed into $RuntimeRoot"
+Install-LuaRuntime -RuntimeRootPath $RuntimeRoot -SkipRuntimeLibraries:$SkipLuaRuntimeLibs -LuaPackagesOnly:$LuaPackagesOnly
+Write-Host "Lua runtime dependencies installed into $RuntimeRoot"

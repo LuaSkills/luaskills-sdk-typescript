@@ -198,73 +198,17 @@ export type LuaRuntimeCapabilityOptions = {
  */
 export type LuaRuntimeRunLuaPoolConfig = LuaVmPoolConfig;
 
-/**
- * Space controller options used by database providers.
- * 数据库 provider 使用的空间控制器选项。
- */
-export type LuaRuntimeSpaceControllerOptions = {
-  /**
-   * Optional endpoint override.
-   * 可选端点覆盖。
-   */
-  endpoint: string | null;
-  /**
-   * Whether the runtime may spawn a controller.
-   * 运行时是否允许启动控制器。
-   */
-  auto_spawn: boolean;
-  /**
-   * Optional executable path.
-   * 可选可执行文件路径。
-   */
-  executable_path: string | null;
-  /**
-   * Controller process mode.
-   * 控制器进程模式。
-   */
-  process_mode: "service" | "managed";
-  /**
-   * Minimum controller uptime in seconds.
-   * 控制器最小存活秒数。
-   */
-  minimum_uptime_secs: number;
-  /**
-   * Controller idle timeout in seconds.
-   * 控制器空闲超时秒数。
-   */
-  idle_timeout_secs: number;
-  /**
-   * Default controller lease TTL in seconds.
-   * 默认控制器租约 TTL 秒数。
-   */
-  default_lease_ttl_secs: number;
-  /**
-   * Connection timeout in seconds.
-   * 连接超时秒数。
-   */
-  connect_timeout_secs: number;
-  /**
-   * Startup timeout in seconds.
-   * 启动等待超时秒数。
-   */
-  startup_timeout_secs: number;
-  /**
-   * Startup retry interval in milliseconds.
-   * 启动重试间隔毫秒数。
-   */
-  startup_retry_interval_ms: number;
-  /**
-   * Lease renew interval in seconds.
-   * 租约续约间隔秒数。
-   */
-  lease_renew_interval_secs: number;
-}
 
 /**
  * Host options forwarded to LuaSkills engine creation.
  * 转发给 LuaSkills 引擎创建流程的宿主选项。
  */
 export type LuaRuntimeHostOptions = {
+  /**
+   * Host process mode; console inherits streams and desktop hides Windows command windows.
+   * 宿主进程模式；console 继承流，desktop 隐藏 Windows 命令窗口。
+   */
+  host_mode: "console" | "desktop";
   /**
    * Canonical runtime root used to derive the fixed LuaSkills layout.
    * 用于推导固定 LuaSkills 布局的规范 runtime root。
@@ -376,40 +320,10 @@ export type LuaRuntimeHostOptions = {
    */
   github_token: string | null;
   /**
-   * Optional SQLite library path.
-   * 可选 SQLite 动态库路径。
-   */
-  sqlite_library_path: string | null;
-  /**
-   * SQLite provider mode.
-   * SQLite provider 模式。
-   */
-  sqlite_provider_mode: "dynamic_library" | "host_callback" | "space_controller";
-  /**
    * SQLite callback mode.
    * SQLite 回调模式。
    */
   sqlite_callback_mode: "standard" | "json";
-  /**
-   * Optional LanceDB library path.
-   * 可选 LanceDB 动态库路径。
-   */
-  lancedb_library_path: string | null;
-  /**
-   * LanceDB provider mode.
-   * LanceDB provider 模式。
-   */
-  lancedb_provider_mode: "dynamic_library" | "host_callback" | "space_controller";
-  /**
-   * LanceDB callback mode.
-   * LanceDB 回调模式。
-   */
-  lancedb_callback_mode: "standard" | "json";
-  /**
-   * Shared space controller options.
-   * 共享空间控制器选项。
-   */
-  space_controller: LuaRuntimeSpaceControllerOptions;
   /**
    * Optional cache configuration object.
    * 可选缓存配置对象。
@@ -839,22 +753,6 @@ export interface SkillInstallRequest {
   source_type: SkillInstallSourceType | `${SkillInstallSourceType}`;
 }
 
-/**
- * Skill uninstall options.
- * skill 卸载选项。
- */
-export interface SkillUninstallOptions {
-  /**
-   * Whether SQLite data should be removed.
-   * 是否删除 SQLite 数据。
-   */
-  remove_sqlite?: boolean;
-  /**
-   * Whether LanceDB data should be removed.
-   * 是否删除 LanceDB 数据。
-   */
-  remove_lancedb?: boolean;
-}
 
 /**
  * FFI version result returned by the JSON bridge.
@@ -1615,26 +1513,6 @@ export interface SkillUninstallResult {
    */
   skill_removed: boolean;
   /**
-   * Whether the SQLite database directory was removed.
-   * SQLite 数据库目录是否被删除。
-   */
-  sqlite_removed: boolean;
-  /**
-   * Whether the LanceDB database directory was removed.
-   * LanceDB 数据库目录是否被删除。
-   */
-  lancedb_removed: boolean;
-  /**
-   * Whether the SQLite database directory was retained.
-   * SQLite 数据库目录是否被保留。
-   */
-  sqlite_retained: boolean;
-  /**
-   * Whether the LanceDB database directory was retained.
-   * LanceDB 数据库目录是否被保留。
-   */
-  lancedb_retained: boolean;
-  /**
    * Human-readable result message.
    * 人类可读结果消息。
    */
@@ -1726,10 +1604,7 @@ export interface LuaSkillsClientOptions extends LuaSkillsSdkOptions {
    * Partial host option overrides merged over SDK defaults.
    * 覆盖 SDK 默认值的部分宿主选项。
    */
-  hostOptions?: Partial<Omit<LuaRuntimeHostOptions, "space_controller" | "capabilities">> & {
-    /** Partial controller policy merged over the existing SDK defaults.
-     * 覆盖现有 SDK 默认值的部分控制器策略。 */
-    space_controller?: Partial<LuaRuntimeSpaceControllerOptions>;
+  hostOptions?: Partial<Omit<LuaRuntimeHostOptions, "capabilities">> & {
     /** Partial capability toggles merged over the existing SDK defaults.
      * 覆盖现有 SDK 默认值的部分能力开关。 */
     capabilities?: Partial<LuaRuntimeCapabilityOptions>;

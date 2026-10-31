@@ -31,13 +31,13 @@ export const EMBEDDED_CONTRACT_VERSION = 1 as const;
  * Generated wire shape for EMBEDDED_CORE_VERSION.
  * EMBEDDED_CORE_VERSION 的生成线形状。
  */
-export const EMBEDDED_CORE_VERSION = "0.7.2" as const;
+export const EMBEDDED_CORE_VERSION = "0.7.3" as const;
 
 /**
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "84b8ccb233b363b71f1ef57016d29dd31b0c52a7eaf003c4760054cc09929d12" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "74537f1a7da62acb6156d4501bf197156866fbfed1d34287b36824911dcfe60f" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -676,16 +676,16 @@ export type InputLuaRuntimeCapabilityOptions = ({
 } & Record<string, EmbeddedJsonValue>);
 
 /**
- * Callback transport mode used when the database provider mode is `host_callback`.
- * 当数据库 provider 模式为 `host_callback` 时所使用的回调传输模式。
+ * Explicit transport for host-registered SQLite callbacks.
+ * 宿主注册 SQLite 回调的显式传输方式。
  */
 export type InputLuaRuntimeDatabaseCallbackMode = ("standard" | "json");
 
 /**
- * Database access mode used by one host-facing runtime backend.
- * 单个宿主侧运行时后端所使用的数据库访问模式。
+ * Per-engine host mode controlling console windows of runtime-owned child processes.
+ * 控制运行库所拥有子进程控制台窗口的引擎级宿主模式。
  */
-export type InputLuaRuntimeDatabaseProviderMode = ("dynamic_library" | "host_callback" | "space_controller");
+export type InputLuaRuntimeHostMode = ("console" | "desktop");
 
 /**
  * Host-provided filesystem and runtime paths consumed by the LuaSkills library.
@@ -748,6 +748,11 @@ export type InputLuaRuntimeHostOptions = ({
  */
 "github_token"?: (InputLuaRuntimeSecretString | null);
 /**
+ * Immutable per-engine process window policy; omitted JSON fields preserve console behavior.
+ * 不可变的引擎级进程窗口策略；JSON 省略此字段时保留命令行行为。
+ */
+"host_mode"?: InputLuaRuntimeHostMode;
+/**
  * Host-managed root directory used only to probe host-provided FFI/native dependencies.
  * 仅用于探测宿主提供 FFI/原生依赖的宿主管理根目录。
  */
@@ -767,21 +772,6 @@ export type InputLuaRuntimeHostOptions = ({
  * 宿主强制跳过的技能标识符列表，会在依赖或数据库初始化前生效。
  */
 "ignored_skill_ids"?: Array<string>;
-/**
- * LanceDB callback transport mode selected by the host when provider mode is `host_callback`.
- * 当 provider 模式为 `host_callback` 时，宿主为 LanceDB 选择的回调传输模式。
- */
-"lancedb_callback_mode"?: InputLuaRuntimeDatabaseCallbackMode;
-/**
- * Explicit LanceDB dynamic-library path owned by the host.
- * 由宿主显式提供的 LanceDB 动态库路径。
- */
-"lancedb_library_path"?: (string | null);
-/**
- * LanceDB database provider mode selected by the host.
- * 宿主为 LanceDB 数据库选择的 provider 模式。
- */
-"lancedb_provider_mode"?: InputLuaRuntimeDatabaseProviderMode;
 /**
  * Optional lua_packages root used to build `package.path` and `package.cpath`.
  * 用于拼接 `package.path` 与 `package.cpath` 的可选 lua_packages 根目录。
@@ -848,25 +838,10 @@ export type InputLuaRuntimeHostOptions = ({
  */
 "skill_config_watch_debounce_ms"?: (EmbeddedInteger | null);
 /**
- * Shared controller client options used when one database backend selects `space_controller`.
- * 当数据库后端选择 `space_controller` 时所使用的共享控制器客户端选项。
- */
-"space_controller"?: InputLuaRuntimeSpaceControllerOptions;
-/**
  * SQLite callback transport mode selected by the host when provider mode is `host_callback`.
  * 当 provider 模式为 `host_callback` 时，宿主为 SQLite 选择的回调传输模式。
  */
 "sqlite_callback_mode"?: InputLuaRuntimeDatabaseCallbackMode;
-/**
- * Explicit SQLite dynamic-library path owned by the host.
- * 由宿主显式提供的 SQLite 动态库路径。
- */
-"sqlite_library_path"?: (string | null);
-/**
- * SQLite database provider mode selected by the host.
- * 宿主为 SQLite 数据库选择的 provider 模式。
- */
-"sqlite_provider_mode"?: InputLuaRuntimeDatabaseProviderMode;
 /**
  * Fixed sibling directory name used under one skill-root parent to store skill state.
  * 在单个技能根父目录下存放技能状态时使用的固定兄弟目录名称。
@@ -882,7 +857,7 @@ export type InputLuaRuntimeHostOptions = ({
  * 宿主管理的临时目录，供 luaexec 请求文件等短生命周期产物使用。
  */
 "temp_dir"?: (string | null);
-} & Record<string, EmbeddedJsonValue>);
+});
 
 /**
  * Host-selected resource policy for managed Python and Node workers and persistent sessions.
@@ -943,74 +918,6 @@ export type InputLuaRuntimeRunLuaPoolConfig = ({
  * 宿主提供的机密文本（例如 GitHub 令牌），`Debug` 永不打印其内容。
  */
 export type InputLuaRuntimeSecretString = string;
-
-/**
- * Host-provided controller client options used when one database backend chooses `space_controller`.
- * 当数据库后端选择 `space_controller` 时使用的宿主侧控制器客户端选项。
- */
-export type InputLuaRuntimeSpaceControllerOptions = ({
-/**
- * Whether the runtime may auto-spawn the controller when the endpoint is unavailable.
- * 当控制器端点不可用时，运行时是否允许自动唤起控制器。
- */
-"auto_spawn": boolean;
-/**
- * Transport connect timeout in seconds used by the controller client proxy.
- * 控制器客户端代理使用的传输连接超时秒数。
- */
-"connect_timeout_secs": EmbeddedInteger;
-/**
- * Default lease TTL in seconds passed to one auto-spawned controller.
- * 传递给自动唤起控制器的默认租约 TTL 秒数。
- */
-"default_lease_ttl_secs": EmbeddedInteger;
-/**
- * Optional explicit controller endpoint; when omitted the shared default endpoint is used.
- * 可选的显式控制器端点；缺失时使用共享默认端点。
- */
-"endpoint"?: (string | null);
-/**
- * Optional local executable path copied and managed by the host.
- * 由宿主复制并管理的可选本地可执行文件路径。
- */
-"executable_path"?: (string | null);
-/**
- * Idle timeout in seconds passed to one auto-spawned controller.
- * 传递给自动唤起控制器的空闲超时秒数。
- */
-"idle_timeout_secs": EmbeddedInteger;
-/**
- * Lease renew interval in seconds used by the background controller client task.
- * 后台控制器客户端任务使用的租约续约间隔秒数。
- */
-"lease_renew_interval_secs": EmbeddedInteger;
-/**
- * Minimum uptime in seconds passed to one auto-spawned controller.
- * 传递给自动唤起控制器的最小存活秒数。
- */
-"minimum_uptime_secs": EmbeddedInteger;
-/**
- * Process mode used when auto-spawning one controller process.
- * 自动唤起控制器进程时使用的进程模式。
- */
-"process_mode": InputLuaRuntimeSpaceControllerProcessMode;
-/**
- * Startup retry interval in milliseconds used while polling one spawned controller.
- * 轮询已唤起控制器时使用的启动重试间隔毫秒数。
- */
-"startup_retry_interval_ms": EmbeddedInteger;
-/**
- * Startup timeout in seconds used while waiting for one spawned controller to become ready.
- * 等待已唤起控制器就绪时使用的启动超时秒数。
- */
-"startup_timeout_secs": EmbeddedInteger;
-} & Record<string, EmbeddedJsonValue>);
-
-/**
- * Process mode used when the runtime auto-spawns one local space controller process.
- * 运行时自动拉起本地空间控制器进程时使用的进程模式。
- */
-export type InputLuaRuntimeSpaceControllerProcessMode = ("service" | "managed");
 
 /**
  * Pool sizing configuration for Lua virtual machines.

@@ -13,7 +13,6 @@ export {
   defaultHostOptions,
   defaultManagedRuntimeConfig,
   defaultPoolConfig,
-  defaultSpaceControllerOptions,
   requireRuntimeLeaseNumberField,
   requireRuntimeLeaseOK,
   requireRuntimeLeaseStringField,

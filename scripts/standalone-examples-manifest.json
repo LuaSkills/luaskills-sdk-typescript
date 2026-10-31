@@ -5,11 +5,13 @@
     { "name": "call", "en": "Call the fixture skill and inline Lua with invocation context.", "zh": "带调用上下文执行夹具技能及内联 Lua。" },
     { "name": "lifecycle", "en": "Disable and enable the fixture through the Skills plane.", "zh": "通过 Skills 平面禁用及启用夹具。" },
     { "name": "runtime-lease", "en": "Reuse one persistent runtime lease and interactive child process.", "zh": "复用一个持久运行时租约及交互式子进程。" },
-    { "name": "provider-callback", "en": "Register a JSON SQLite provider callback before engine creation.", "zh": "在创建引擎前注册 JSON SQLite provider 回调。" }
+    { "name": "provider-callback", "en": "Verify real host SQLite writes, rollback, queries and persistence through Lua and FFI (Node.js 24+).", "zh": "通过 Lua 和 FFI 验证真实宿主 SQLite 写入、回滚、查询和持久化（Node.js 24+）。" }
   ],
   "support_files": [
     "LICENSE",
     "examples/load-sdk.mjs",
+    "examples/sqlite-demo.mjs",
+    "examples/sqlite-demo-fixture.json",
     "examples/fixture-runtime/user_skills/demo-standard-ffi-skill/skill.yaml",
     "examples/fixture-runtime/user_skills/demo-standard-ffi-skill/runtime/ping.lua",
     "examples/fixture-runtime/system_lua_lib/runtime-lease-example/dependencies.json"

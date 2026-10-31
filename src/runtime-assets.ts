@@ -25,7 +25,7 @@ const SHA512_BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
  * Default LuaSkills release tag used by SDK runtime installation.
  * SDK 运行时安装使用的默认 LuaSkills 发布标签。
  */
-export const DEFAULT_LUASKILLS_VERSION = "v0.7.2";
+export const DEFAULT_LUASKILLS_VERSION = "v0.7.3";
 
 /**
  * Default luaskills-packages release series used by SDK runtime installation.
@@ -33,23 +33,8 @@ export const DEFAULT_LUASKILLS_VERSION = "v0.7.2";
  */
 export const DEFAULT_LUASKILLS_PACKAGES_SERIES = "0.1";
 
-/**
- * Default vldb-controller release tag used by SDK runtime installation.
- * SDK 运行时安装使用的默认 vldb-controller 发布标签。
- */
-export const DEFAULT_VLDB_CONTROLLER_VERSION = "v0.2.3";
 
-/**
- * Default vldb-sqlite release tag used by SDK runtime installation.
- * SDK 运行时安装使用的默认 vldb-sqlite 发布标签。
- */
-export const DEFAULT_VLDB_SQLITE_VERSION = "v0.1.6";
 
-/**
- * Default vldb-lancedb release tag used by SDK runtime installation.
- * SDK 运行时安装使用的默认 vldb-lancedb 发布标签。
- */
-export const DEFAULT_VLDB_LANCEDB_VERSION = "v0.1.5";
 
 /**
  * Default managed CPython version installed for Lua-driven child runtimes.
@@ -92,18 +77,8 @@ export enum RuntimeDatabasePreset {
    */
   None = "none",
   /**
-   * Use the shared vldb-controller executable through space_controller mode.
-   * 通过 space_controller 模式使用共享 vldb-controller 可执行文件。
-   */
-  VldbController = "vldb-controller",
-  /**
-   * Use vldb-sqlite-lib and vldb-lancedb-lib dynamic libraries directly.
-   * 直接使用 vldb-sqlite-lib 与 vldb-lancedb-lib 动态库。
-   */
-  VldbDirect = "vldb-direct",
-  /**
-   * Let the host provide JSON callbacks instead of native VLDB assets.
-   * 由宿主提供 JSON callback，而不是安装原生 VLDB 资产。
+   * Let the host provide SQLite JSON callbacks without installing database assets.
+   * 由宿主提供 SQLite JSON 回调，不安装数据库资产。
    */
   HostCallback = "host-callback",
 }
@@ -112,7 +87,7 @@ export enum RuntimeDatabasePreset {
  * Runtime asset role inside one installation manifest.
  * 安装清单中的运行时资产角色。
  */
-export type RuntimeAssetRole = "lua_runtime" | "luaskills_ffi" | "vldb_controller" | "vldb_sqlite_lib" | "vldb_lancedb_lib";
+export type RuntimeAssetRole = "lua_runtime" | "luaskills_ffi";
 
 /**
  * Managed child runtime group selected by SDK installation.
@@ -131,8 +106,8 @@ export interface RuntimePlatformTarget {
    */
   platform_key: string;
   /**
-   * Rust-style target triple used by VLDB release archives.
-   * VLDB 发布归档使用的 Rust 风格 target triple。
+   * Rust-style target triple identifying the native platform.
+   * 标识原生平台的 Rust 风格 target triple。
    */
   target_triple: string;
   /**
@@ -140,11 +115,6 @@ export interface RuntimePlatformTarget {
    * 当前平台使用的归档扩展名。
    */
   archive_ext: ".tar.gz" | ".zip";
-  /**
-   * vldb-controller executable file name inside the archive.
-   * 归档内的 vldb-controller 可执行文件名。
-   */
-  controller_binary_name: string;
   /**
    * Dynamic library file extension used by this platform.
    * 当前平台使用的动态库文件扩展名。
@@ -155,16 +125,6 @@ export interface RuntimePlatformTarget {
    * 安装后的预期 LuaSkills 动态库文件名。
    */
   luaskills_library_name: string;
-  /**
-   * Expected SQLite dynamic library file name after installation.
-   * 安装后的预期 SQLite 动态库文件名。
-   */
-  sqlite_library_name: string;
-  /**
-   * Expected LanceDB dynamic library file name after installation.
-   * 安装后的预期 LanceDB 动态库文件名。
-   */
-  lancedb_library_name: string;
 }
 
 /**
@@ -292,21 +252,6 @@ export interface RuntimeInstallOptions {
    */
   luaRuntimeSeries?: string;
   /**
-   * vldb-controller release tag.
-   * vldb-controller 发布标签。
-   */
-  vldbControllerVersion?: string;
-  /**
-   * vldb-sqlite release tag.
-   * vldb-sqlite 发布标签。
-   */
-  vldbSqliteVersion?: string;
-  /**
-   * vldb-lancedb release tag.
-   * vldb-lancedb 发布标签。
-   */
-  vldbLancedbVersion?: string;
-  /**
    * Whether the LuaSkills FFI SDK archive should be included.
    * 是否包含 LuaSkills FFI SDK 归档。
    */
@@ -326,21 +271,6 @@ export interface RuntimeInstallOptions {
    * 发布 runtime packages 资产的 GitHub 仓库。
    */
   luaRuntimeRepo?: string;
-  /**
-   * GitHub repository that publishes vldb-controller assets.
-   * 发布 vldb-controller 资产的 GitHub 仓库。
-   */
-  vldbControllerRepo?: string;
-  /**
-   * GitHub repository that publishes vldb-sqlite assets.
-   * 发布 vldb-sqlite 资产的 GitHub 仓库。
-   */
-  vldbSqliteRepo?: string;
-  /**
-   * GitHub repository that publishes vldb-lancedb assets.
-   * 发布 vldb-lancedb 资产的 GitHub 仓库。
-   */
-  vldbLancedbRepo?: string;
   /**
    * Managed child runtime group to install under runtimeRoot/dependencies.
    * 安装到 runtimeRoot/dependencies 下的受管子运行时分组。
@@ -465,11 +395,8 @@ export function resolveRuntimePlatformTarget(
       platform_key: "windows-x64",
       target_triple: "x86_64-pc-windows-msvc",
       archive_ext: ".zip",
-      controller_binary_name: "vldb-controller.exe",
       dynamic_library_ext: ".dll",
       luaskills_library_name: "luaskills.dll",
-      sqlite_library_name: "vldb_sqlite.dll",
-      lancedb_library_name: "vldb_lancedb.dll",
     };
   }
   if (platform === "darwin" && arch === "x64") {
@@ -508,7 +435,7 @@ export function buildRuntimeInstallManifest(options: RuntimeInstallOptions): Run
     database_mode: database,
     platform,
     assets,
-    host_options_patch: buildHostOptionsPatch(runtimeRoot, database, platform, assets),
+    host_options_patch: buildHostOptionsPatch(database),
     managed_runtimes: buildManagedRuntimeInstallPlan(options, runtimeRoot),
   };
 }
@@ -628,53 +555,16 @@ export function sanitizeRuntimeManifestHostOptions(runtimeRoot: string, patch: u
   if (typeof patch !== "object" || patch === null || Array.isArray(patch)) {
     throw new Error("host_options_patch must be one object");
   }
-  const sanitized: Record<string, unknown> = { ...(patch as Record<string, unknown>) };
-  for (const key of ["sqlite_library_path", "lancedb_library_path"]) {
-    const sanitizedPath = sanitizeRuntimeManifestPath(runtimeRoot, sanitized[key], key);
-    if (sanitizedPath !== null) {
-      sanitized[key] = sanitizedPath;
+  // Reject exact retired fields; never resurrect the removed database installation paths.
+  // 拒绝精确的退役字段；绝不恢复已移除的数据库安装路径。
+  for (const key of ["sqlite_library_path", "sqlite_provider_mode", "lancedb_library_path", "lancedb_provider_mode", "lancedb_callback_mode", "space_controller"]) {
+    if (key in patch) {
+      throw new Error(`host_options_patch.${key} was removed in 0.7.3; register SQLite with the host`);
     }
   }
-  if ("space_controller" in sanitized && sanitized.space_controller !== null && sanitized.space_controller !== undefined) {
-    if (typeof sanitized.space_controller !== "object" || Array.isArray(sanitized.space_controller)) {
-      throw new Error("host_options_patch.space_controller must be one object");
-    }
-    const spaceController = { ...(sanitized.space_controller as Record<string, unknown>) };
-    const sanitizedPath = sanitizeRuntimeManifestPath(runtimeRoot, spaceController.executable_path, "space_controller.executable_path");
-    if (sanitizedPath !== null) {
-      spaceController.executable_path = sanitizedPath;
-    }
-    sanitized.space_controller = spaceController;
-  }
-  return sanitized;
+  return { ...(patch as Record<string, unknown>) };
 }
 
-/**
- * Validate one runtime-root-scoped host option path.
- * 校验单个受 runtime-root 约束的宿主选项路径。
- */
-export function sanitizeRuntimeManifestPath(runtimeRoot: string, value: unknown, context: string): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    throw new Error(`host_options_patch.${context} must be a string path`);
-  }
-  if (value.trim() === "" || value.includes("\0")) {
-    throw new Error(`host_options_patch.${context} must be a path inside runtime root`);
-  }
-  const rootPath = resolve(runtimeRoot);
-  let candidatePath = value;
-  if (isAbsolute(value) || winPath.isAbsolute(value)) {
-    candidatePath = resolve(value);
-  } else {
-    validateManagedRuntimeRelativePath(value, `host_options_patch.${context}`);
-    candidatePath = resolve(rootPath, value);
-  }
-  ensurePathInsideRoot(rootPath, candidatePath, `host_options_patch.${context}`, value);
-  ensureExistingPathInsideRoot(rootPath, candidatePath, `host_options_patch.${context}`, value);
-  return candidatePath;
-}
 
 /**
  * Resolve an installed LuaSkills dynamic library from one runtime root.
@@ -699,12 +589,6 @@ export function resolveLuaSkillsLibraryPathFromRuntime(runtimeRoot: string, plat
 export function normalizeDatabasePreset(value: RuntimeDatabasePreset | `${RuntimeDatabasePreset}`): RuntimeDatabasePreset {
   if (value === RuntimeDatabasePreset.None) {
     return RuntimeDatabasePreset.None;
-  }
-  if (value === RuntimeDatabasePreset.VldbController) {
-    return RuntimeDatabasePreset.VldbController;
-  }
-  if (value === RuntimeDatabasePreset.VldbDirect) {
-    return RuntimeDatabasePreset.VldbDirect;
   }
   if (value === RuntimeDatabasePreset.HostCallback) {
     return RuntimeDatabasePreset.HostCallback;
@@ -813,11 +697,8 @@ function darwinTarget(archPrefix: "x86_64" | "aarch64", platformKey: string): Ru
     platform_key: platformKey,
     target_triple: `${archPrefix}-apple-darwin`,
     archive_ext: ".tar.gz",
-    controller_binary_name: "vldb-controller",
     dynamic_library_ext: ".dylib",
     luaskills_library_name: "libluaskills.dylib",
-    sqlite_library_name: "libvldb_sqlite.dylib",
-    lancedb_library_name: "libvldb_lancedb.dylib",
   };
 }
 
@@ -830,11 +711,8 @@ function linuxTarget(archPrefix: "x86_64" | "aarch64", platformKey: string): Run
     platform_key: platformKey,
     target_triple: `${archPrefix}-unknown-linux-gnu`,
     archive_ext: ".tar.gz",
-    controller_binary_name: "vldb-controller",
     dynamic_library_ext: ".so",
     luaskills_library_name: "libluaskills.so",
-    sqlite_library_name: "libvldb_sqlite.so",
-    lancedb_library_name: "libvldb_lancedb.so",
   };
 }
 
@@ -859,16 +737,6 @@ function buildRuntimeAssetDescriptors(options: RuntimeInstallOptions & { databas
   if (options.includeLuaSkillsFfi ?? true) {
     const assetName = `luaskills-ffi-sdk-${platform.platform_key}.tar.gz`;
     assets.push(releaseAsset("luaskills_ffi", options.luaskillsRepo ?? "LuaSkills/luaskills", options.luaskillsVersion ?? DEFAULT_LUASKILLS_VERSION, assetName, `libs/${platform.luaskills_library_name}`));
-  }
-  if (options.database === RuntimeDatabasePreset.VldbController) {
-    const assetName = `vldb-controller-${options.vldbControllerVersion ?? DEFAULT_VLDB_CONTROLLER_VERSION}-${platform.target_triple}${platform.archive_ext}`;
-    assets.push(releaseAsset("vldb_controller", options.vldbControllerRepo ?? "OpenVulcan/vldb-controller", options.vldbControllerVersion ?? DEFAULT_VLDB_CONTROLLER_VERSION, assetName, `bin/${platform.controller_binary_name}`));
-  }
-  if (options.database === RuntimeDatabasePreset.VldbDirect) {
-    const sqliteAsset = `vldb-sqlite-lib-${options.vldbSqliteVersion ?? DEFAULT_VLDB_SQLITE_VERSION}-${platform.target_triple}${platform.archive_ext}`;
-    const lancedbAsset = `vldb-lancedb-lib-${options.vldbLancedbVersion ?? DEFAULT_VLDB_LANCEDB_VERSION}-${platform.target_triple}${platform.archive_ext}`;
-    assets.push(releaseAsset("vldb_sqlite_lib", options.vldbSqliteRepo ?? "OpenVulcan/vldb-sqlite", options.vldbSqliteVersion ?? DEFAULT_VLDB_SQLITE_VERSION, sqliteAsset, `libs/${platform.sqlite_library_name}`));
-    assets.push(releaseAsset("vldb_lancedb_lib", options.vldbLancedbRepo ?? "OpenVulcan/vldb-lancedb", options.vldbLancedbVersion ?? DEFAULT_VLDB_LANCEDB_VERSION, lancedbAsset, `libs/${platform.lancedb_library_name}`));
   }
   return assets;
 }
@@ -992,43 +860,10 @@ function luaSkillsLibraryCandidates(platform: RuntimePlatformTarget): string[] {
  * Build host option overrides for one database mode.
  * 为单个数据库模式构造宿主选项覆盖。
  */
-function buildHostOptionsPatch(runtimeRoot: string, database: RuntimeDatabasePreset, platform: RuntimePlatformTarget, assets: RuntimeAssetDescriptor[]): Partial<LuaRuntimeHostOptions> {
-  if (database === RuntimeDatabasePreset.HostCallback) {
-    return {
-      sqlite_provider_mode: "host_callback",
-      sqlite_callback_mode: "json",
-      lancedb_provider_mode: "host_callback",
-      lancedb_callback_mode: "json",
-    };
-  }
-  if (database === RuntimeDatabasePreset.VldbController) {
-    return {
-      sqlite_provider_mode: "space_controller",
-      lancedb_provider_mode: "space_controller",
-      space_controller: {
-        endpoint: null,
-        auto_spawn: true,
-        executable_path: resolve(runtimeRoot, "bin", platform.controller_binary_name),
-        process_mode: "managed",
-        minimum_uptime_secs: 300,
-        idle_timeout_secs: 900,
-        default_lease_ttl_secs: 120,
-        connect_timeout_secs: 5,
-        startup_timeout_secs: 15,
-        startup_retry_interval_ms: 250,
-        lease_renew_interval_secs: 30,
-      },
-    };
-  }
-  if (database === RuntimeDatabasePreset.VldbDirect) {
-    return {
-      sqlite_library_path: resolveInstalledAsset(runtimeRoot, assets, "vldb_sqlite_lib"),
-      sqlite_provider_mode: "dynamic_library",
-      lancedb_library_path: resolveInstalledAsset(runtimeRoot, assets, "vldb_lancedb_lib"),
-      lancedb_provider_mode: "dynamic_library",
-    };
-  }
-  return {};
+function buildHostOptionsPatch(database: RuntimeDatabasePreset): Partial<LuaRuntimeHostOptions> {
+  // The preset selects transport only; the host owns the database and callback.
+  // 预设仅选择传输；宿主拥有数据库及回调。
+  return database === RuntimeDatabasePreset.HostCallback ? { sqlite_callback_mode: "json" } : {};
 }
 
 /**
@@ -1368,6 +1203,11 @@ async function installManagedPnpmRuntime(runtimeRoot: string, plan: ManagedRunti
  * 下载、校验、解压并安装单个资产。
  */
 async function installOneAsset(runtimeRoot: string, asset: RuntimeAssetDescriptor, temporaryRoot: string, platform: RuntimePlatformTarget): Promise<void> {
+  // Validate the role before downloading or extracting any archive.
+  // 在下载或解压归档前验证角色。
+  if (asset.role !== "lua_runtime" && asset.role !== "luaskills_ffi") {
+    throw new Error(`Unsupported runtime asset role: ${asset.role}`);
+  }
   const assetDirectory = join(temporaryRoot, asset.role);
   const archivePath = join(assetDirectory, asset.asset_name);
   const extractDirectory = join(assetDirectory, "extract");
@@ -1381,12 +1221,6 @@ async function installOneAsset(runtimeRoot: string, asset: RuntimeAssetDescripto
     await installLuaRuntime(runtimeRoot, extractDirectory, asset);
   } else if (asset.role === "luaskills_ffi") {
     await installLuaSkillsFfi(runtimeRoot, extractDirectory, platform, asset);
-  } else if (asset.role === "vldb_controller") {
-    await installController(runtimeRoot, extractDirectory, platform, asset);
-  } else if (asset.role === "vldb_sqlite_lib") {
-    await installDynamicLibrary(runtimeRoot, extractDirectory, platform, "sqlite", asset);
-  } else if (asset.role === "vldb_lancedb_lib") {
-    await installDynamicLibrary(runtimeRoot, extractDirectory, platform, "lancedb", asset);
   }
 }
 
@@ -1877,35 +1711,7 @@ async function installLuaSkillsFfi(runtimeRoot: string, extractDirectory: string
   asset.installed_path = relativeInstalledPath(runtimeRoot, installedPath);
 }
 
-/**
- * Install vldb-controller into the runtime bin directory.
- * 将 vldb-controller 安装到 runtime bin 目录。
- */
-async function installController(runtimeRoot: string, extractDirectory: string, platform: RuntimePlatformTarget, asset: RuntimeAssetDescriptor): Promise<void> {
-  const source = await findFile(extractDirectory, (candidate) => candidate === platform.controller_binary_name);
-  if (!source) {
-    throw new Error(`${platform.controller_binary_name} was not found in ${asset.asset_name}`);
-  }
-  const destination = resolve(runtimeRoot, "bin", platform.controller_binary_name);
-  await cp(source, destination, { force: true });
-  await chmod(destination, 0o755).catch(() => undefined);
-  asset.installed_path = `bin/${platform.controller_binary_name}`;
-}
 
-/**
- * Install one VLDB dynamic library into the runtime libs directory.
- * 将单个 VLDB 动态库安装到 runtime libs 目录。
- */
-async function installDynamicLibrary(runtimeRoot: string, extractDirectory: string, platform: RuntimePlatformTarget, nameHint: "sqlite" | "lancedb", asset: RuntimeAssetDescriptor): Promise<void> {
-  const source = await findFile(extractDirectory, (candidate) => candidate.endsWith(platform.dynamic_library_ext) && candidate.toLowerCase().includes(nameHint));
-  if (!source) {
-    throw new Error(`Dynamic library for ${asset.role} was not found in ${asset.asset_name}`);
-  }
-  const destinationName = source.split(/[\\/]/).pop() ?? (nameHint === "sqlite" ? platform.sqlite_library_name : platform.lancedb_library_name);
-  const destination = resolve(runtimeRoot, "libs", destinationName);
-  await cp(source, destination, { force: true });
-  asset.installed_path = `libs/${destinationName}`;
-}
 
 /**
  * Copy one directory only when it exists.
@@ -2095,6 +1901,6 @@ function errorMessage(error: unknown): string {
 function refreshHostOptionsPatch(manifest: RuntimeInstallManifest): RuntimeInstallManifest {
   return {
     ...manifest,
-    host_options_patch: buildHostOptionsPatch(manifest.runtime_root, normalizeDatabasePreset(manifest.database_mode), manifest.platform, manifest.assets),
+    host_options_patch: buildHostOptionsPatch(normalizeDatabasePreset(manifest.database_mode)),
   };
 }

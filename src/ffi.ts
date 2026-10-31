@@ -1,7 +1,8 @@
 import koffi from "koffi";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { resolveLuaSkillsLibraryPathFromRuntime } from "./runtime-assets.js";
+import { jsonEngineScopes, sqliteLibraryKey, retainSqliteScope, retireSqliteCallback } from "./sqlite-lifetime.js";
 import type { FfiDescribeResult, JsonValue, LuaSkillsSdkOptions, SkillInstallSourceType } from "./types.js";
 
 /**
@@ -511,7 +512,7 @@ type JsonProviderSetterFunction = (
  * Native JSON callback slot names managed by this bridge.
  * 当前桥接管理的原生 JSON callback 槽位名称。
  */
-type JsonCallbackKind = "sqlite" | "lancedb" | "host-tool" | "skill-operation-progress" | "model-embed" | "model-llm";
+type JsonCallbackKind = "sqlite" | "host-tool" | "skill-operation-progress" | "model-embed" | "model-llm";
 
 /**
  * Module-level JSON callback slot state matching native process-wide slots.
@@ -697,8 +698,31 @@ export class LuaSkillsJsonFfi {
       ptr: bytes.length > 0 ? bytes : null,
       len: bytes.length,
     };
-    const output = fn(input);
-    return this.decodeEnvelope<T>(functionName, output);
+    // Pin before native capture so callback replacement cannot invalidate a new engine.
+    // 在原生捕获前固定回调，防止替换使新引擎失效。
+    const releaseScope = functionName === "luaskills_ffi_engine_new_json" ? retainSqliteScope(this.libraryPath) : null;
+    // Result has the endpoint's declared wire shape after successful envelope decoding.
+    // 成功解码信封后，result 具有端点声明的线协议形状。
+    let result: T;
+    try {
+      result = this.decodeEnvelope<T>(functionName, fn(input));
+    } catch (error) {
+      if (releaseScope !== null) releaseScope();
+      throw error;
+    }
+    if (releaseScope !== null) {
+      jsonEngineScopes.set(`${sqliteLibraryKey(this.libraryPath)}:${(result as { engine_id: number }).engine_id}`, releaseScope);
+    } else if (functionName === "luaskills_ffi_engine_free_json") {
+      // Native success is required before dropping the captured callback generation.
+      // 丢弃捕获的回调代次前必须确认原生成功。
+      const key = `${sqliteLibraryKey(this.libraryPath)}:${(payload as { engine_id: number }).engine_id}`;
+      // A raw caller may free an engine created outside this SDK, which has no SDK pin.
+      // 原始调用方可以释放 SDK 外创建的引擎，该引擎没有 SDK 固定。
+      const releaseOwner = jsonEngineScopes.get(key);
+      jsonEngineScopes.delete(key);
+      if (releaseOwner !== undefined) releaseOwner();
+    }
+    return result;
   }
 
   /**
@@ -767,17 +791,6 @@ export class LuaSkillsJsonFfi {
     );
   }
 
-  /**
-   * Register or clear the LanceDB JSON provider callback.
-   * 注册或清理 LanceDB JSON provider callback。
-   */
-  setLanceDbProviderJsonCallback(callback: JsonProviderCallback | null): void {
-    this.setJsonProviderCallback(
-      "lancedb",
-      "luaskills_ffi_set_lancedb_provider_json_callback",
-      callback,
-    );
-  }
 
   /**
    * Register or clear the host-tool JSON callback.
@@ -835,13 +848,6 @@ export class LuaSkillsJsonFfi {
     this.setSqliteProviderJsonCallback(null);
   }
 
-  /**
-   * Clear the LanceDB JSON provider callback slot.
-   * 清理 LanceDB JSON provider callback 槽位。
-   */
-  clearLanceDbProviderJsonCallback(): void {
-    this.setLanceDbProviderJsonCallback(null);
-  }
 
   /**
    * Clear the host-tool JSON callback slot.
@@ -881,7 +887,6 @@ export class LuaSkillsJsonFfi {
    */
   clearJsonProviderCallbacks(): void {
     this.clearSqliteProviderJsonCallback();
-    this.clearLanceDbProviderJsonCallback();
     this.clearHostToolJsonCallback();
     this.clearSkillOperationProgressJsonCallback();
     this.clearModelEmbedJsonCallback();
@@ -949,7 +954,11 @@ export class LuaSkillsJsonFfi {
         return;
       }
       this.callProviderSetter(functionName, null);
-      koffi.unregister(previousSlot.registeredCallback);
+      if (kind === "sqlite") {
+        retireSqliteCallback(this.libraryPath, () => koffi.unregister(previousSlot.registeredCallback));
+      } else {
+        koffi.unregister(previousSlot.registeredCallback);
+      }
       JSON_PROVIDER_SLOTS.delete(slotKey);
       return;
     }
@@ -982,7 +991,11 @@ export class LuaSkillsJsonFfi {
     }
 
     if (previousSlot) {
-      koffi.unregister(previousSlot.registeredCallback);
+      if (kind === "sqlite") {
+        retireSqliteCallback(this.libraryPath, () => koffi.unregister(previousSlot.registeredCallback));
+      } else {
+        koffi.unregister(previousSlot.registeredCallback);
+      }
     }
     JSON_PROVIDER_SLOTS.set(slotKey, {
       libraryPath: this.libraryPath,
@@ -1047,7 +1060,7 @@ export class LuaSkillsJsonFfi {
    * 为单个动态库路径和 callback 类型构造进程内 JSON callback 槽位键。
    */
   private jsonProviderSlotKey(kind: JsonCallbackKind): string {
-    return `${this.libraryPath}:${kind}`;
+    return `${sqliteLibraryKey(this.libraryPath)}:${kind}`;
   }
 }
 
@@ -1090,5 +1103,7 @@ export function resolveLibraryPath(explicitPath?: string, runtimeRoot?: string):
   if (!existsSync(absolutePath)) {
     throw new Error(`LuaSkills library not found: ${absolutePath}`);
   }
-  return absolutePath;
+  // Canonicalize aliases before loading so callback slots and native owners share one library key.
+  // 加载前规范化别名，使回调槽位与原生所有者共享同一个库键。
+  return realpathSync(absolutePath);
 }

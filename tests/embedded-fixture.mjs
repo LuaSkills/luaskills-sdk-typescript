@@ -80,6 +80,14 @@ export async function withRuntime(action, { driverConfig = null, transportConfig
       await initialize({ type: "runtime_initialize", runtime_id: runtimeId, engine_options: engineOptions, runtime_config: limits });
     }
     const status = transport.request({ type: "runtime_status", runtime_id: runtimeId });
+    // Default releases reject the optional journal without silently enabling SQLite.
+    // 默认发行版拒绝可选日志，不会静默启用 SQLite。
+    if (persistent && process.env.LUASKILLS_SQLITE_JOURNAL_E2E !== "1") {
+      assert.equal(status.initialization, "failed");
+      assert.equal(status.error.code, "invalid_argument");
+      assert.match(status.error.message, /explicit sqlite-journal feature/);
+      return;
+    }
     assert.equal(status.initialization, "ready", JSON.stringify(status));
     // Commands bind one exact runtime identity; no name-based lookup or fallback is involved.
     // 命令绑定一个精确运行时身份；不涉及名称查找或回退。

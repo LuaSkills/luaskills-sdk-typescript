@@ -58,7 +58,7 @@ node .\examples\lifecycle.mjs
 node .\examples\runtime-lease.mjs
 ```
 
-`provider-callback.mjs` registers a JSON SQLite provider callback before engine creation.
+`provider_callback` (`provider-callback.mjs` for TypeScript) verifies real SQLite: schema creation, parameterized writes, transaction rollback, queries and persistence after engine recreation. Only the host creates data; the retained database path is printed.
 
 ```powershell
 node .\examples\provider-callback.mjs
@@ -75,3 +75,5 @@ The fixture skill is stored at `examples/fixture-runtime/user_skills/demo-standa
 The repository workflow **Examples Release** creates `luaskills-sdk-typescript-examples-{VERSION}.zip` after the matching npm package is published. The workflow installs `@luaskills/sdk@{VERSION}` from npm and runs the examples before uploading the asset.
 
 The release tag is `examples-v{VERSION}` so example assets stay separate from SDK package versions.
+
+Set `LUASKILLS_LIB` to the installed core library for the SQLite demo. Python uses its standard library; TypeScript requires Node.js 24+.

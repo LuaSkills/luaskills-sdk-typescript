@@ -27,6 +27,7 @@ const testFiles = [
   "embedded-scope.mjs",
   "skill-config-native-e2e.mjs",
   "skill-operation-progress-callback.mjs",
+  "sqlite-host.mjs",
   "system-management-raw-call-boundary.mjs",
   "client-lifecycle-boundary.mjs",
   "ffi-envelope-errors.mjs",

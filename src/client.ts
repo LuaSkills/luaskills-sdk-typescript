@@ -21,7 +21,6 @@ import {
   type RuntimeLeaseCreateOptions,
   type LuaRuntimeHostOptions,
   type LuaRuntimeManagedRuntimeConfig,
-  type LuaRuntimeSpaceControllerOptions,
   type LuaSkillsClientOptions,
   type LuaSkillsSdkOptions,
   type LuaVmPoolConfig,
@@ -49,7 +48,6 @@ import {
   type SkillPackageConfigStatus,
   type SkillInstallRequest,
   type SkillLifecycleOptions,
-  type SkillUninstallOptions,
   type SkillUninstallResult,
 } from "./types.js";
 
@@ -959,7 +957,6 @@ export class SkillManagementClient {
   uninstall(
     skillRoots: RuntimeSkillRoot[],
     skillId: string,
-    options: SkillUninstallOptions = {},
     lifecycleOptions: SkillLifecycleOptions = {},
   ): SkillUninstallResult {
     return this.client.callJson<SkillUninstallResult>(
@@ -968,7 +965,6 @@ export class SkillManagementClient {
         engine_id: this.client.engineId,
         skill_roots: skillRoots,
         skill_id: skillId,
-        options,
         target_root: lifecycleOptions.targetRoot ?? null,
         ...this.#authorityPayload(lifecycleOptions.authority),
       },
@@ -1872,6 +1868,9 @@ export function defaultManagedRuntimeConfig(): LuaRuntimeManagedRuntimeConfig {
 export function defaultHostOptions(runtimeRoot: string): LuaRuntimeHostOptions {
   const root = resolve(runtimeRoot);
   const baseOptions: LuaRuntimeHostOptions = {
+    // Console inherits streams; desktop hides runtime-owned Windows command windows.
+    // console 继承流；desktop 隐藏运行库自有 Windows 命令窗口。
+    host_mode: "console",
     runtime_root: root,
     managed_runtime_distribution_root: null,
     managed_runtime_environment_root: null,
@@ -1894,13 +1893,7 @@ export function defaultHostOptions(runtimeRoot: string): LuaRuntimeHostOptions {
     github_base_url: null,
     github_api_base_url: null,
     github_token: null,
-    sqlite_library_path: null,
-    sqlite_provider_mode: "dynamic_library",
     sqlite_callback_mode: "standard",
-    lancedb_library_path: null,
-    lancedb_provider_mode: "dynamic_library",
-    lancedb_callback_mode: "standard",
-    space_controller: defaultSpaceControllerOptions(),
     cache_config: null,
     runlua_pool_config: null,
     reserved_entry_names: [],
@@ -1914,25 +1907,6 @@ export function defaultHostOptions(runtimeRoot: string): LuaRuntimeHostOptions {
   return manifest ? mergeHostOptions(baseOptions, hostOptionsFromRuntimeManifest(manifest) as HostOptionsOverride) : baseOptions;
 }
 
-/**
- * Return the SDK default space-controller options.
- * 返回 SDK 默认 space-controller 选项。
- */
-export function defaultSpaceControllerOptions(): LuaRuntimeSpaceControllerOptions {
-  return {
-    endpoint: null,
-    auto_spawn: false,
-    executable_path: null,
-    process_mode: "managed",
-    minimum_uptime_secs: 300,
-    idle_timeout_secs: 900,
-    default_lease_ttl_secs: 120,
-    connect_timeout_secs: 5,
-    startup_timeout_secs: 15,
-    startup_retry_interval_ms: 250,
-    lease_renew_interval_secs: 30,
-  };
-}
 
 /**
  * Merge caller-provided host overrides over one complete host option object.
@@ -1945,10 +1919,6 @@ function mergeHostOptions(base: LuaRuntimeHostOptions, overrides?: HostOptionsOv
   return {
     ...base,
     ...overrides,
-    space_controller: {
-      ...base.space_controller,
-      ...(overrides.space_controller ?? {}),
-    },
     capabilities: {
       ...base.capabilities,
       ...(overrides.capabilities ?? {}),

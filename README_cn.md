@@ -6,7 +6,7 @@ LuaSkills 主仓库：[LuaSkills/luaskills](https://github.com/LuaSkills/luaskil
 
 TypeScript / Node.js SDK，用于通过公共 JSON FFI 接入 LuaSkills 运行时。
 
-此源码面向 `0.6.7` 发布线；发布及资产验收遵循既有发布流程。它沿用严格的技能包级配置契约，并将运行时资产默认值设为 LuaSkills core `v0.7.2`、vldb-controller `v0.2.3` 与 vldb-sqlite `v0.1.6`。
+此源码对齐已发布的 LuaSkills core `0.7.3`。SQLite 仅由宿主注册和管理；运行时安装器仅安装核心与 Lua 资源。
 
 SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正式 skill root、带权限语义的管理调用、skill config、provider callback、宿主工具 callback 与 runtime 资产安装。宿主在常规集成中不需要手写底层 FFI buffer 或 JSON 包络。
 
@@ -78,7 +78,7 @@ JavaScript 处理器在拥有泵的 Node 事件循环运行；同步处理器必
 
 `operation.wait({ signal, pollIntervalMs })` 使用预留控制通道轮询真实核心快照，仅自动消费成功的只读查询回执，并返回含副作用证据的成功、失败或取消终态。使用 `AbortSignal`（包括 `AbortSignal.timeout`）限制观察时长，不会因此取消原生执行。`operation.cancel()` 独立请求协作取消；`operation.forget()` 移除核心记录，与遗忘 SDK 回执相互独立。中断或失败的查询仍可通过 `driver.commands` 找回。轮询在入场前校验正整数定时器边界；实现受控依赖跟踪前，宿主回调中的普通驱动器及生命周期等待明确返回不支持，包括跨运行时等待。
 
-现有 `createEngineOptions()` 已可与生成的嵌入式输入契约组合使用。其 JSON 选项结构调整为结构化类型别名，不再支持对原接口进行声明合并；缓存配置使用生成契约中的三个数字字段，不接受任意 JSON。完整显式引擎选项必须提供 `enable_managed_io_compat`；构建器仍允许部分覆盖，并按现有规则合并嵌套能力及控制器默认值。旧 JSON 选项继续使用 `number`，需要精确 bigint 预算时使用生成的嵌入式类型。这些是后续统一版本的开发迁移变化，不代表已发布 0.5.7 动态库已更新。
+现有 `createEngineOptions()` 已可与生成的嵌入式输入契约组合使用。其 JSON 选项结构调整为结构化类型别名，不再支持对原接口进行声明合并；缓存配置使用生成契约中的三个数字字段，不接受任意 JSON。完整显式引擎选项必须提供 `enable_managed_io_compat`；构建器仍允许部分覆盖，并按现有规则合并嵌套能力默认值。旧 JSON 选项继续使用 `number`，需要精确 bigint 预算时使用生成的嵌入式类型。这些是后续统一版本的开发迁移变化，不代表已发布 0.5.7 动态库已更新。
 
 执行 `npm run generate:embedded-contract` 可完全离线重新生成；`node scripts/generate-embedded-contract.mjs --check` 只读比较。显式同步新核心产物时使用 `--source <path/to/contract.json>`，相邻摘要和 README 必须存在。未知 Schema、重复 JSON 成员、缺失局部引用、冲突输出定义、标识符冲突及命令覆盖漂移均使生成失败。npm 包包含生成器及完整契约，不依赖开发机仓库路径。
 
@@ -100,7 +100,7 @@ npm run test:embedded-candidate -- <绝对archive.tgz路径> <绝对候选库路
 
 ## 安装
 
-0.6.7 SDK 要求 Node.js 24 LTS 或更高版本。
+0.7.3 SDK 要求 Node.js 24 LTS 或更高版本。
 
 ```bash
 npm install @luaskills/sdk
@@ -117,17 +117,17 @@ Linux 与 macOS 会使用安装在 `runtimeRoot/libs` 下的 `.so` / `.dylib` �
 
 ## Runtime 资产
 
-npm 包还提供不依赖 Node.js CLI 的统一同步脚本，可直接拉取 LuaSkills FFI、Lua runtime packages 与 VLDB：
+npm 包还提供不依赖 Node.js CLI 的统一同步脚本，可直接拉取 LuaSkills FFI、Lua runtime packages：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_assets.ps1 -Target all -Database vldb-controller -RuntimeRoot D:\runtime\luaskills
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_assets.ps1 -Target all -RuntimeRoot D:\runtime\luaskills
 ```
 
 ```bash
-RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all vldb-controller
+RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all
 ```
 
-目标支持 `all`、`luaskills`、`lua`、`vldb`；VLDB 模式支持 `none`、`vldb-controller`、`vldb-direct`、`host-callback`。脚本默认固定 LuaSkills `v0.7.2`，并允许显式覆盖发布版本。
+同步脚本目标支持 `all`、`luaskills`、`lua`，默认核心版本为 `v0.7.3`。CLI 的数据库选项仅支持 `none` 与 `host-callback`；后者只设置 `sqlite_callback_mode: json`，仍需宿主注册。
 
 `install-runtime` 会下载 GitHub Release 资产、校验 `.sha256` 旁路文件、解压原生文件与 Lua runtime 包，并写入：
 
@@ -138,9 +138,7 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 支持的数据库模式：
 
 - `none`：安装 Lua runtime 归档与 LuaSkills FFI SDK 归档，但不安装数据库 provider。
-- `vldb-direct`：安装 `vldb-sqlite-lib` 与 `vldb-lancedb-lib` 动态库，并使用 `dynamic_library` provider 模式。
-- `vldb-controller`：安装 `vldb-controller`，并使用托管的 `space_controller` provider 模式。
-- `host-callback`：不安装 VLDB 二进制文件，只生成 `host_callback + json` 宿主配置。
+- `host-callback`：不安装数据库二进制，只设置 `sqlite_callback_mode: json`；宿主必须注册 SQLite。
 
 默认 LuaSkills 资产：
 
@@ -195,14 +193,14 @@ const pythonInstall = LuaSkillsClient.resolveManagedRuntimeInstall({
 ## 版本对齐
 
 - 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
-- 当前 SDK 默认指向 LuaSkills core 标签 `v0.7.2`。
+- 当前 SDK 默认指向 LuaSkills core 标签 `v0.7.3`。
 - runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
 - SDK 默认 host options 传入 `runtime_root`、两个空的受管根覆盖槽与完整稳定的 `managed_runtime_config`；宿主未显式覆盖时，LuaSkills 会推导固定数据布局。
 - 宿主工具直接放在 `runtime_root/bin`，不再放到 `runtime_root/bin/tools`。
 
 ```powershell
-npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
-npx @luaskills/sdk install-runtime --database vldb-controller --runtime-root D:\runtime\luaskills
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk install-runtime --database none --managed-runtimes all --runtime-root D:\runtime\luaskills
 ```
@@ -210,7 +208,7 @@ npx @luaskills/sdk install-runtime --database none --managed-runtimes all --runt
 下载前可用 `--dry-run` 检查准确的 release URL：
 
 ```powershell
-npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills --dry-run
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills --dry-run
 ```
 
 已经自行管理 Lua 包的高级宿主可以跳过 Lua runtime 归档：
@@ -246,17 +244,10 @@ runtimeRoot/user_skills
 ```powershell
 $env:NODE_USE_ENV_PROXY = "1" # 仅在 Node fetch 需要使用 HTTP_PROXY/HTTPS_PROXY 时设置
 
-npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk version --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk list --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk call demo-standard-ffi-skill-ping '{"note":"npx"}' --runtime-root D:\runtime\luaskills
-```
-
-如果更希望使用共享 controller 模式：
-
-```powershell
-npx @luaskills/sdk install-runtime --database vldb-controller --runtime-root D:\runtime\luaskills
-npx @luaskills/sdk call demo-standard-ffi-skill-ping '{"note":"controller"}' --runtime-root D:\runtime\luaskills
 ```
 
 SDK 会自动从 runtime manifest 与 `runtimeRoot/libs` 解析 `luaskills.dll` / `libluaskills.so` / `libluaskills.dylib`。
@@ -373,33 +364,17 @@ try {
 
 ## JSON Provider Callback
 
-SQLite / LanceDB 的 `host_callback + json` 模式可以在 engine 创建前通过 SDK 注册：
+使用随包提供的真实 SQLite 示例：验证建表、参数化写入、失败批次回滚、查询及重建引擎后的持久化。输出数据库路径，示例数据保留供检查。
 
-```ts
-import { LuaSkillsClient, LuaSkillsJsonFfi } from "@luaskills/sdk";
+使用 Node.js 24+ 内置的 `node:sqlite`，无需额外驱动。
 
-const runtimeRoot = "D:/runtime/luaskills";
-const ffi = new LuaSkillsJsonFfi({ runtimeRoot });
-
-ffi.setSqliteProviderJsonCallback((request) => {
-  return { ok: true, request };
-});
-
-try {
-  const client = LuaSkillsClient.create({
-    runtimeRoot,
-    hostOptions: {
-      sqlite_provider_mode: "host_callback",
-      sqlite_callback_mode: "json",
-    },
-  });
-  client.close();
-} finally {
-  ffi.clearSqliteProviderJsonCallback();
-}
+```sh
+node examples/provider-callback.mjs
 ```
 
-callback 必须在 `engine_new` 前注册；engine 创建后再切换 callback 不会 retroactive 影响已存在的 engine。
+回调接收 `{action, binding, input}`：`binding.default_database_path` 是核心提供的路径，`input` 是技能传入的宿主 SQL 协议。示例实现 `execute_script`、`execute_batch`、`query_json`，其他动作明确报错。宿主负责 SQL 参数、事务和连接生命周期；不要让技能输入覆盖绑定路径。
+
+在引擎创建前注册回调，并设置 `sqlite_callback_mode: "json"`。回调在引擎创建时捕获；后续替换或清空只影响新引擎。SDK 保留旧回调至原生所有者释放，宿主的数据库资源也必须保持有效。`host_mode: "desktop"` 统一隐藏 Windows 命令窗口，`"console"` 为默认模式。技能卸载不会删除宿主数据库。
 
 ## 宿主工具 Callback
 
@@ -599,7 +574,7 @@ CLI 默认把 `--skill-config-root` 设为 `<runtime-root>/config`；嵌入 SDK 
 $env:HTTP_PROXY = "http://127.0.0.1:10808"
 $env:HTTPS_PROXY = "http://127.0.0.1:10808"
 $env:NODE_USE_ENV_PROXY = "1"
-npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
 ```
 
 ### `LuaSkills library path is required`
@@ -636,9 +611,6 @@ D:\runtime\luaskills\user_skills\demo-standard-ffi-skill\skill.yaml
 .\node_modules\.bin\luaskills.ps1 call demo-standard-ffi-skill-ping '{"note":"powershell"}' --runtime-root D:\runtime\luaskills
 ```
 
-### `vldb-controller` 测试后仍保留进程
-
-托管 controller 模式可能会按 lease/idle timeout 保留 controller 进程。测试清理时只应停止测试 `runtimeRoot/bin` 下的 controller 可执行文件。
 
 ## JSON FFI 覆盖范围
 
@@ -651,7 +623,7 @@ SDK 覆盖公共 JSON FFI 主要入口：
 - prompt_argument_completions / is_skill / skill_name_for_tool
 - call_skill / run_lua
 - skill_config list / describe / validate / get / 批量 set / CAS delete / refresh / 事件轮询
-- SQLite / LanceDB JSON provider callback register / clear
+- SQLite JSON provider callback register / clear
 - 宿主工具 JSON callback register / clear
 - 模型 embed / LLM JSON callback register / clear
 - disable / enable / install / update / uninstall
@@ -690,3 +662,7 @@ npm 发布成功后，手动运行 GitHub Actions 里的 **Examples Release** �
 - `luaskills-sdk-typescript-examples-{VERSION}.zip.sha256`
 
 示例 release tag 故意使用 `examples-v` 前缀，因为它是示例资产发布，不是 SDK 包版本。
+
+## 0.7.3 数据库迁移
+
+移除 VLDB、LanceDB 及动态数据库库路径、提供方模式和控制器配置。仅保留宿主 SQLite 注册。默认发布核心不包含 SQLite 日志后端，文件日志初始化会明确返回需要 `sqlite-journal` 特性的错误；自定义核心可显式启用此适配器。原数据库文件不会自动删除或迁移。

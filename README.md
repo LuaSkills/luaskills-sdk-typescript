@@ -6,7 +6,7 @@ Main LuaSkills repository: [LuaSkills/luaskills](https://github.com/LuaSkills/lu
 
 TypeScript / Node.js SDK for integrating the LuaSkills runtime through the public JSON FFI surface.
 
-This source targets the `0.6.7` release line; publication and artifact verification follow the release workflow. It retains the strict package-level skill configuration contract and defaults runtime assets to LuaSkills core `v0.7.2`, vldb-controller `v0.2.3`, and vldb-sqlite `v0.1.6`.
+This source aligns with released LuaSkills core `0.7.3`. SQLite is registered and managed by the host; runtime installers fetch only the core and Lua assets.
 
 The SDK wraps native library loading, JSON FFI buffers, engine lifecycle, formal skill roots, authority-aware management calls, skill config, provider callbacks, host-tool callbacks, and runtime asset installation. Hosts should not need to hand-write low-level FFI buffers or JSON envelopes for normal integration.
 
@@ -78,7 +78,7 @@ Both runtime and capacity `registerPool(definition, policy, permissions, executi
 
 `operation.wait({ signal, pollIntervalMs })` polls actual core snapshots using the reserved control lane, consuming only successful read-only query receipts. It returns success, failure or cancellation snapshots with effect evidence. Use an `AbortSignal` (including `AbortSignal.timeout`) to bound observation; this never requests native cancellation. `operation.cancel()` separately requests cooperative cancellation, and `operation.forget()` removes the core record independently of SDK receipt forgetting. Interrupted or failed queries remain discoverable on `driver.commands`. Polling validates positive integer timer bounds before admission. Ordinary driver and lifecycle waits from host callbacks are currently rejected as unsupported, including cross-runtime waits, until controlled dependency tracking is implemented.
 
-The existing `createEngineOptions()` now composes with the generated embedded input contract. Its JSON option structures are structural type aliases; declaration merging of the former interfaces is no longer supported. Cache configuration uses the generated three numeric fields rather than arbitrary JSON, and fully explicit engine options require `enable_managed_io_compat`. Partial builder overrides still merge over existing defaults, including nested capability and controller options. Legacy JSON options continue to use `number`; use the generated embedded types when explicit bigint budgets are needed. These are development migration changes for the forthcoming coordinated version, not an update to already published 0.5.7 libraries.
+The existing `createEngineOptions()` now composes with the generated embedded input contract. Its JSON option structures are structural type aliases; declaration merging of the former interfaces is no longer supported. Cache configuration uses the generated three numeric fields rather than arbitrary JSON, and fully explicit engine options require `enable_managed_io_compat`. Partial builder overrides still merge over existing defaults, including nested capability options. Legacy JSON options continue to use `number`; use the generated embedded types when explicit bigint budgets are needed. These are development migration changes for the forthcoming coordinated version, not an update to already published 0.5.7 libraries.
 
 Run `npm run generate:embedded-contract` to regenerate entirely offline, or `node scripts/generate-embedded-contract.mjs --check` to compare without writing. To explicitly synchronize a new core artifact, use `--source <path/to/contract.json>`; its adjacent digest and README must be present. Unknown schema constructs, duplicate JSON members, missing local references, conflicting output definitions, identifier collisions and command coverage drift stop generation. The generator and complete contract are included in the npm package; no developer-machine repository path is needed.
 
@@ -100,7 +100,7 @@ Run the example directly with `npm run example:embedded-candidate -- <absolute-c
 
 ## Installation
 
-The 0.6.7 SDK requires Node.js 24 LTS or newer.
+The 0.7.3 SDK requires Node.js 24 LTS or newer.
 
 ```bash
 npm install @luaskills/sdk
@@ -117,17 +117,17 @@ Linux and macOS use the corresponding `.so` / `.dylib` binaries installed under 
 
 ## Runtime Assets
 
-The npm package includes a unified script that does not require the Node.js CLI and directly fetches LuaSkills FFI, Lua runtime packages, and VLDB:
+The npm package includes a unified script that does not require the Node.js CLI and directly fetches LuaSkills FFI, Lua runtime packages:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_assets.ps1 -Target all -Database vldb-controller -RuntimeRoot D:\runtime\luaskills
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_assets.ps1 -Target all -RuntimeRoot D:\runtime\luaskills
 ```
 
 ```bash
-RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all vldb-controller
+RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all
 ```
 
-Supported targets are `all`, `luaskills`, `lua`, and `vldb`. VLDB presets are `none`, `vldb-controller`, `vldb-direct`, and `host-callback`. The scripts pin LuaSkills to `v0.7.2` by default and accept explicit release-version overrides.
+Sync script targets are `all`, `luaskills`, and `lua`, with core `v0.7.3`. CLI database presets are only `none` and `host-callback`; the latter sets `sqlite_callback_mode: json` and still requires host registration.
 
 `install-runtime` downloads GitHub Release assets, verifies `.sha256` sidecars, extracts native files and Lua runtime packages, and writes:
 
@@ -138,9 +138,7 @@ runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
 Supported database modes:
 
 - `none`: installs the Lua runtime archive and the LuaSkills FFI SDK archive, without database providers.
-- `vldb-direct`: installs `vldb-sqlite-lib` and `vldb-lancedb-lib` dynamic libraries and uses `dynamic_library` provider mode.
-- `vldb-controller`: installs `vldb-controller` and uses managed `space_controller` provider mode.
-- `host-callback`: installs no VLDB binaries and generates `host_callback + json` host options.
+- `host-callback`: installs no database binaries and sets `sqlite_callback_mode: json`; the host must register SQLite.
 
 Default LuaSkills assets:
 
@@ -195,14 +193,14 @@ The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime p
 ## Version Alignment
 
 - Keep the SDK and LuaSkills core on the same current release line whenever possible.
-- The current SDK defaults to LuaSkills core tag `v0.7.2`.
+- The current SDK defaults to LuaSkills core tag `v0.7.3`.
 - Runtime packages and native dependencies still come from the split `LuaSkills/luaskills-packages` and related release assets.
 - SDK default host options pass `runtime_root`, null managed-root override slots, and the complete stable `managed_runtime_config`; LuaSkills derives the fixed data layout until the host explicitly overrides roots or policy.
 - Host tools live directly under `runtime_root/bin`, not `runtime_root/bin/tools`.
 
 ```powershell
-npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
-npx @luaskills/sdk install-runtime --database vldb-controller --runtime-root D:\runtime\luaskills
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk install-runtime --database none --managed-runtimes all --runtime-root D:\runtime\luaskills
 ```
@@ -210,7 +208,7 @@ npx @luaskills/sdk install-runtime --database none --managed-runtimes all --runt
 Use `--dry-run` to inspect exact release URLs before downloading:
 
 ```powershell
-npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills --dry-run
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills --dry-run
 ```
 
 Advanced hosts that already manage Lua packages can skip the Lua runtime archive:
@@ -246,17 +244,10 @@ End-to-end CLI flow with a prepared runtime root:
 ```powershell
 $env:NODE_USE_ENV_PROXY = "1" # only needed when Node fetch must use HTTP_PROXY/HTTPS_PROXY
 
-npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk version --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk list --runtime-root D:\runtime\luaskills
 npx @luaskills/sdk call demo-standard-ffi-skill-ping '{"note":"npx"}' --runtime-root D:\runtime\luaskills
-```
-
-If you prefer the shared controller mode:
-
-```powershell
-npx @luaskills/sdk install-runtime --database vldb-controller --runtime-root D:\runtime\luaskills
-npx @luaskills/sdk call demo-standard-ffi-skill-ping '{"note":"controller"}' --runtime-root D:\runtime\luaskills
 ```
 
 The SDK automatically resolves `luaskills.dll` / `libluaskills.so` / `libluaskills.dylib` from the runtime manifest and `runtimeRoot/libs`.
@@ -373,33 +364,17 @@ try {
 
 ## JSON Provider Callback
 
-SQLite / LanceDB `host_callback + json` mode can be registered through the SDK before engine creation:
+Run the shipped real SQLite demo: it verifies schema creation, parameterized writes, failed-batch rollback, queries, and persistence after recreating the engine. It prints the database path and retains the data for inspection.
 
-```ts
-import { LuaSkillsClient, LuaSkillsJsonFfi } from "@luaskills/sdk";
+Uses Node.js 24+ built-in `node:sqlite`, without an extra driver.
 
-const runtimeRoot = "D:/runtime/luaskills";
-const ffi = new LuaSkillsJsonFfi({ runtimeRoot });
-
-ffi.setSqliteProviderJsonCallback((request) => {
-  return { ok: true, request };
-});
-
-try {
-  const client = LuaSkillsClient.create({
-    runtimeRoot,
-    hostOptions: {
-      sqlite_provider_mode: "host_callback",
-      sqlite_callback_mode: "json",
-    },
-  });
-  client.close();
-} finally {
-  ffi.clearSqliteProviderJsonCallback();
-}
+```sh
+node examples/provider-callback.mjs
 ```
 
-Callbacks must be registered before `engine_new`. Changing callbacks later does not retroactively affect already-created engines.
+Callbacks receive `{action, binding, input}`: `binding.default_database_path` is provided by the core and `input` is the host SQL protocol supplied by the skill. The demo implements `execute_script`, `execute_batch`, and `query_json`; unsupported actions fail explicitly. The host owns SQL parameters, transactions, and connection lifetime. Never let skill input override the binding path.
+
+Register before creating the engine and set `sqlite_callback_mode: "json"`. Engines capture their provider; replacement or clearing affects only new engines. The SDK retains old callbacks until native owners are freed, and host database resources must remain valid too. `host_mode: "desktop"` hides Windows command windows; `"console"` is the default. Uninstalling a skill does not delete its host database.
 
 ## Host Tool Callback
 
@@ -599,7 +574,7 @@ Set proxy variables and enable Node environment proxy support when needed:
 $env:HTTP_PROXY = "http://127.0.0.1:10808"
 $env:HTTPS_PROXY = "http://127.0.0.1:10808"
 $env:NODE_USE_ENV_PROXY = "1"
-npx @luaskills/sdk install-runtime --database vldb-direct --runtime-root D:\runtime\luaskills
+npx @luaskills/sdk install-runtime --database host-callback --runtime-root D:\runtime\luaskills
 ```
 
 ### `LuaSkills library path is required`
@@ -636,9 +611,6 @@ When calling the local npm `.cmd` shim directly from PowerShell, single-quoted J
 .\node_modules\.bin\luaskills.ps1 call demo-standard-ffi-skill-ping '{"note":"powershell"}' --runtime-root D:\runtime\luaskills
 ```
 
-### `vldb-controller` process remains after tests
-
-Managed controller mode may keep a controller process alive for its lease/idle timeout. For tests, stop only the controller executable under your test `runtimeRoot/bin`.
 
 ## JSON FFI Coverage
 
@@ -651,7 +623,7 @@ The SDK covers the public JSON FFI surface:
 - prompt_argument_completions / is_skill / skill_name_for_tool
 - call_skill / run_lua
 - skill_config list / describe / validate / get / batch set / CAS delete / refresh / event polling
-- SQLite / LanceDB JSON provider callback register / clear
+- SQLite JSON provider callback register / clear
 - Host-tool JSON callback register / clear
 - Model embed / LLM JSON callback register / clear
 - disable / enable / install / update / uninstall
@@ -690,3 +662,7 @@ The standalone ZIP is a fixed source package selected by `scripts/standalone-exa
 - `luaskills-sdk-typescript-examples-{VERSION}.zip.sha256`
 
 The examples release tag intentionally uses the `examples-v` prefix because it is an examples asset release, not an SDK package version.
+
+## 0.7.3 Database Migration
+
+VLDB, LanceDB, dynamic database library paths, provider modes and controller configuration are removed. SQLite remains host-registered only. The default released core excludes the SQLite journal backend and rejects file-journal initialization with an explicit `sqlite-journal` feature error; custom cores can opt into this adapter. Existing database files are not automatically removed or migrated.
