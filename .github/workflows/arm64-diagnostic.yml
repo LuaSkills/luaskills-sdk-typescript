@@ -1,71 +1,58 @@
-name: ARM64 SQLite release diagnostics
+name: ARM64 core 0.7.4 installed SDK regression
 on: push
 permissions:
   contents: read
-  actions: read
 jobs:
-  allocator-reproduction:
-    runs-on: ubuntu-24.04-arm
-    strategy:
-      fail-fast: false
-      matrix:
-        allocator: [system, internal]
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install the exact original compiler
-        run: rustup toolchain install 1.94.0 --profile minimal
-      - name: Build the independent allocator reproduction
-        env:
-          RUSTFLAGS: '-C relocation-model=static -C link-arg=-no-pie'
-        run: cargo +1.94.0 build --release --manifest-path scripts/allocator-reproduction/Cargo.toml
-      - name: Run without the SDK or core
-        run: scripts/allocator-reproduction/target/release/luajit-address-reproduction ${{ matrix.allocator }}
-  diagnose:
+  combined-release-consumer:
     runs-on: ubuntu-24.04-arm
     steps:
+      # Both commits are explicit release sources; this diagnostic publishes no versions.
+      # 两个提交都是明确的发布源码；此诊断不发布任何版本。
       - uses: actions/checkout@v6
+        with:
+          repository: LuaSkills/luaskills
+          ref: 916946a5e1ec246db0fb4adec59cd051c88e8e01
+          path: core
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: LuaSkills/luaskills-sdk-typescript
+          ref: 169fa891d05e76030bd72d814df83b1b96408b38
+          path: sdk
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
-      - uses: actions/download-artifact@v4
-        with:
-          name: sdk-tested-archive
-          path: sdk-archive
-          run-id: 41171128386
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: core-prerequisites
-          path: core-proof
-          run-id: 41171128386
-          github-token: ${{ github.token }}
-      - name: Install the exact candidate and native debugger
+          node-version: '24.18.0'
+      - name: Build the default core without SQLite
+        working-directory: core
+        run: cargo build --locked --release --lib -j 4
+      - name: Capture the actual core description through its authoritative helper
+        working-directory: core
         run: |
-          mkdir consumer
-          cd consumer
-          npm init -y
-          npm install --ignore-scripts --no-audit --no-fund ../sdk-archive/luaskills-sdk-0.7.3.tgz koffi@2.16.1
-          sudo apt-get update -qq
-          sudo apt-get install -y gdb
-      - name: Capture separate and combined native stacks
-        env:
-          LUASKILLS_LIB: ${{ github.workspace }}/core-proof/sdk-inputs/linux-arm64/libluaskills.so
-          CORE_DESCRIPTION: ${{ github.workspace }}/core-proof/sdk-inputs/linux-arm64/core-description.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, 'scripts/release')
+          from candidate import native_description
+          # Read the exact generated contract and native descriptor from this single checkout.
+          # 从此唯一检出读取精确生成契约和原生描述。
+          contract = json.loads(Path('contracts/embedded/v1/contract.json').read_text())
+          Path('target/core-description.json').write_bytes(native_description(Path('target/release/libluaskills.so'), contract))
+          PY
+      - name: Build the real npm archive
+        working-directory: sdk
         run: |
-          cp scripts/arm64-release-diagnostic.mjs consumer/diagnostic.mjs
-          cd consumer
-          for mode in embedded sqlite combined; do
-            # A normally exited inferior has no registers; collect all modes without requesting them.
-            # 正常退出的被调试进程没有寄存器；不请求寄存器，以便收集全部模式。
-            gdb -batch -ex run -ex 'thread apply all bt' --args node diagnostic.mjs "$mode" > "$mode.log" 2>&1
-            cat "$mode.log"
-          done
-          # Only the crashing combination has a live register set; preserve allocator addresses and instructions.
-          # 仅崩溃组合保留活动寄存器；保存分配地址和指令证据。
-          gdb -batch -ex run -ex 'info registers' -ex 'x/16i $pc-32' -ex 'info proc mappings' --args node diagnostic.mjs combined > combined-registers.log 2>&1
-          cat combined-registers.log
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: arm64-native-diagnostics
-          path: consumer/*.log
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm pack
+      - name: Run the unchanged installed same-process embedded and SQLite gate
+        working-directory: sdk
+        run: |
+          # The production gate runs embedded teardown, value policy and SQLite in one installed consumer process.
+          # 正式门禁在同一已安装消费进程中执行嵌入式关闭、值策略和 SQLite。
+          library="$(realpath ../core/target/release/libluaskills.so)"
+          digest="$(sha256sum "$library" | cut -d' ' -f1)"
+          npm run test:embedded-candidate -- "$(realpath luaskills-sdk-0.7.4.tgz)" "$library" "$digest" "$(realpath ../core/target/core-description.json)"
