@@ -531,7 +531,9 @@ class ReleaseGateTests(unittest.TestCase):
         复制实际 tgz，并为每个隔离测试创建明确合成的证据。
         """
         self.temporary = tempfile.TemporaryDirectory(prefix="luaskills-release-test-")
-        self.root = Path(self.temporary.name)
+        # The real candidate loader returns canonical paths; model that contract across macOS aliases and Windows casing.
+        # 真实候选加载器返回规范路径；夹具遵循该契约，覆盖 macOS 别名及 Windows 大小写规范化。
+        self.root = Path(self.temporary.name).resolve()
         (self.root / "original").mkdir()
         self.archive = self.root / "original" / Path(OPTIONS.archive).name
         self.archive.write_bytes(Path(OPTIONS.archive).read_bytes())
