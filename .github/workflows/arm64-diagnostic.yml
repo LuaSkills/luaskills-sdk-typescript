@@ -20,4 +20,6 @@ jobs:
         env:
           RUSTFLAGS: '-C relocation-model=static -C link-arg=-no-pie'
           CARGO_TARGET_DIR: target/allocator-nonpie
-        run: cargo test --locked --lib runtime::lua_state::tests -j 4 -- --test-threads=1 --nocapture
+        # An explicit target keeps executable-only flags off host procedural-macro shared libraries.
+        # 显式目标使仅用于可执行文件的标志不影响宿主过程宏动态库。
+        run: cargo test --locked --target aarch64-unknown-linux-gnu --lib runtime::lua_state::tests -j 4 -- --test-threads=1 --nocapture
