@@ -4,6 +4,18 @@ permissions:
   contents: read
   actions: read
 jobs:
+  allocator-reproduction:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install the exact original compiler
+        run: rustup toolchain install 1.94.0 --profile minimal
+      - name: Build the independent allocator reproduction
+        env:
+          RUSTFLAGS: '-C relocation-model=static -C link-arg=-no-pie'
+        run: cargo +1.94.0 build --release --manifest-path scripts/allocator-reproduction/Cargo.toml
+      - name: Run without the SDK or core
+        run: scripts/allocator-reproduction/target/release/luajit-address-reproduction
   diagnose:
     runs-on: ubuntu-24.04-arm
     steps:

@@ -1,0 +1,10 @@
+[package]
+name = "luajit-address-reproduction"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+mlua = { version = "=0.12.0", features = ["luajit52", "vendored", "send"] }
+mlua-sys = "=0.11.0"
+luajit-src = "=210.7.1"
