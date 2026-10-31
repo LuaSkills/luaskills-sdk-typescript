@@ -15,7 +15,7 @@ TARGET="${1:-all}"
 RUNTIME_ROOT="${RUNTIME_ROOT:-output}"
 # LuaSkillsVersion stores the exact LuaSkills release tag.
 # LuaSkillsVersion 保存精确的 LuaSkills 发布标签。
-LUASKILLS_VERSION="${LUASKILLS_VERSION:-v0.7.3}"
+LUASKILLS_VERSION="${LUASKILLS_VERSION:-v0.7.4}"
 
 case "$TARGET" in
   all|luaskills)
