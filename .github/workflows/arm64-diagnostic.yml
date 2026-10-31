@@ -1,0 +1,49 @@
+name: ARM64 SQLite release diagnostics
+on: push
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-tested-archive
+          path: sdk-archive
+          run-id: 41171128386
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-prerequisites
+          path: core-proof
+          run-id: 41171128386
+          github-token: ${{ github.token }}
+      - name: Install the exact candidate and native debugger
+        run: |
+          mkdir consumer
+          cd consumer
+          npm init -y
+          npm install --ignore-scripts --no-audit --no-fund ../sdk-archive/luaskills-sdk-0.7.3.tgz koffi@2.16.1
+          sudo apt-get update -qq
+          sudo apt-get install -y gdb
+      - name: Capture separate and combined native stacks
+        env:
+          LUASKILLS_LIB: ${{ github.workspace }}/core-proof/sdk-inputs/linux-arm64/libluaskills.so
+          CORE_DESCRIPTION: ${{ github.workspace }}/core-proof/sdk-inputs/linux-arm64/core-description.json
+        run: |
+          cp scripts/arm64-release-diagnostic.mjs consumer/diagnostic.mjs
+          cd consumer
+          for mode in embedded sqlite combined; do
+            gdb -batch -ex run -ex 'thread apply all bt' -ex 'info registers' --args node diagnostic.mjs "$mode" > "$mode.log" 2>&1
+            cat "$mode.log"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arm64-native-diagnostics
+          path: consumer/*.log
