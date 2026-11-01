@@ -1495,6 +1495,11 @@ export interface SkillApplyResult {
    * 可选稳定来源定位。
    */
   source_locator?: string | null;
+  /**
+   * Platform key of the installed platform package, such as `windows-x64` or `linux-arm64`; absent for standard and all-systems packages.
+   * 已安装平台包的平台标识，例如 `windows-x64` 或 `linux-arm64`；标准包与全系统包不包含此字段。
+   */
+  package_platform?: string;
 }
 
 /**

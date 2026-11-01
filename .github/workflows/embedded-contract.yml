@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: LuaSkills/luaskills
-          ref: 21e2fae1be8f68e5478c2f2339af16b538bf4aa4 # v0.7.4
+          ref: 408e7e97cb2d5af4e83c9cafa15acb08887db044 # v0.8.0
           path: .release-core
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
