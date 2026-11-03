@@ -64,6 +64,12 @@ node .\examples\runtime-lease.mjs
 node .\examples\provider-callback.mjs
 ```
 
+`host-writable-dirs.mjs` keeps `temp_dir` and `download_cache_root` in a host-owned directory outside `runtimeRoot` with `preserve_host_writable_dirs: true`, so the runtime root can stay read-only. The host creates `temp_dir`; the engine creates the download cache. Set `LUASKILLS_EXAMPLE_WRITABLE_ROOT` to choose the writable directory (default: a new temporary directory).
+
+```powershell
+node .\examples\host-writable-dirs.mjs
+```
+
 Model callback integration is documented in the main [SDK README](../README.md#model-callback). The generic examples do not call a real model provider because model credentials, provider choice, budgets, and redaction policy are host-owned.
 
 ## Fixture Skill

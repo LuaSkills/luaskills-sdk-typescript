@@ -191,6 +191,9 @@ function expression(schema, names) {
  */
 export function generate(contract, bytes) {
   if (contract.contract_version !== 1 || contract.generator.schema_draft !== "2020-12") throw new Error("Unsupported contract version or draft");
+  // The contract names its core release series; every patch of that series keeps these exact bytes.
+  // 契约声明核心发布系列；该系列的每个补丁版本保持这些精确字节。
+  if (typeof contract.core_series !== "string" || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(contract.core_series)) throw new Error("Invalid core release series");
   // Required metadata must be usable before native ownership or memory copying is allowed.
   // 在允许原生所有权或内存复制之前，必需元数据必须可用。
   const compatibility = contract.compatibility;
@@ -223,7 +226,7 @@ export function generate(contract, bytes) {
     "/** Exact integer inputs use bigint outside the safe number range.\n * 超出安全 number 范围的精确整数输入使用 bigint。 */\nexport type EmbeddedInteger = number | bigint;\n",
     "/** Recursive JSON values with lossless integers and explicit float intent.\n * 具有无损整数和显式浮点意图的递归 JSON 值。 */\nexport type EmbeddedJsonValue = null | boolean | string | number | bigint | EmbeddedFloat | EmbeddedJsonValue[] | { [key: string]: EmbeddedJsonValue };\n"];
   const owners = new Set(["EmbeddedInteger", "EmbeddedJsonValue", "EmbeddedNativeStatus", "EmbeddedRootResponseMap", "EmbeddedRuntimeResponseMap"]);
-  for (const [name, value] of Object.entries({ EMBEDDED_PROTOCOL_VERSION: contract.protocol_version, EMBEDDED_CONTRACT_VERSION: contract.contract_version, EMBEDDED_CORE_VERSION: contract.core_version, EMBEDDED_CONTRACT_SHA256: createHash("sha256").update(bytes).digest("hex"), EMBEDDED_ROOT_COMMANDS: contract.commands, EMBEDDED_RUNTIME_COMMANDS: contract.runtime_commands,
+  for (const [name, value] of Object.entries({ EMBEDDED_PROTOCOL_VERSION: contract.protocol_version, EMBEDDED_CONTRACT_VERSION: contract.contract_version, EMBEDDED_CORE_SERIES: contract.core_series, EMBEDDED_CONTRACT_SHA256: createHash("sha256").update(bytes).digest("hex"), EMBEDDED_ROOT_COMMANDS: contract.commands, EMBEDDED_RUNTIME_COMMANDS: contract.runtime_commands,
     EMBEDDED_DESCRIPTION_VERSION: contract.compatibility.description_version,
     EMBEDDED_DESCRIPTION_MAX_BYTES: contract.compatibility.max_description_bytes,
     EMBEDDED_REQUIRED_CAPABILITIES: contract.compatibility.required_capabilities })) {

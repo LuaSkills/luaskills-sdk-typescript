@@ -35,6 +35,7 @@ const testFiles = [
   "runtime-manifest-errors.mjs",
   "runtime-manifest-host-options.mjs",
   "runtime-archive-validation.mjs",
+  "runtime-core-series.mjs",
   "runtime-tar-gz-validation.mjs",
   "runtime-checksum-validation.mjs",
   "runtime-managed-path-validation.mjs",

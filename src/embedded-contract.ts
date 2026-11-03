@@ -28,16 +28,16 @@ export const EMBEDDED_PROTOCOL_VERSION = 1 as const;
 export const EMBEDDED_CONTRACT_VERSION = 1 as const;
 
 /**
- * Generated wire shape for EMBEDDED_CORE_VERSION.
- * EMBEDDED_CORE_VERSION 的生成线形状。
+ * Generated wire shape for EMBEDDED_CORE_SERIES.
+ * EMBEDDED_CORE_SERIES 的生成线形状。
  */
-export const EMBEDDED_CORE_VERSION = "0.8.2" as const;
+export const EMBEDDED_CORE_SERIES = "0.9" as const;
 
 /**
  * Generated wire shape for EMBEDDED_CONTRACT_SHA256.
  * EMBEDDED_CONTRACT_SHA256 的生成线形状。
  */
-export const EMBEDDED_CONTRACT_SHA256 = "462afd7e67435f16fdbc4cb8a2304aa0d25d1e9b69f3be3b95afa30c68be91ab" as const;
+export const EMBEDDED_CONTRACT_SHA256 = "3b0cf62cf4cb3953d62ac147605be9dfe1d3ad18f190e53fa548cfc70099ad64" as const;
 
 /**
  * Generated wire shape for EMBEDDED_ROOT_COMMANDS.
@@ -797,6 +797,15 @@ export type InputLuaRuntimeHostOptions = ({
  * 受管 Hub 安装使用的可选官方 LuaSkills Hub 基址。
  */
 "official_skill_hub_base_url"?: (string | null);
+/**
+ * Keep the host-set `temp_dir` and `download_cache_root` instead of deriving them from
+ * `runtime_root`, so a read-only runtime root never receives transient files or downloads.
+ * Both paths are then required; the host creates `temp_dir`, the engine creates the cache.
+ * 保留宿主设置的 `temp_dir` 与 `download_cache_root`，不再从 `runtime_root` 推导，
+ * 使只读运行时根绝不接收临时文件或下载内容。此时两个路径均为必填；宿主创建 `temp_dir`，
+ * 引擎创建下载缓存。
+ */
+"preserve_host_writable_dirs"?: boolean;
 /**
  * Host-controlled URL prefixes allowed for private skill manifests.
  * 宿主管控的私有技能 manifest 允许 URL 前缀。

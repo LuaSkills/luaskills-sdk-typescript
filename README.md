@@ -6,7 +6,7 @@ Main LuaSkills repository: [LuaSkills/luaskills](https://github.com/LuaSkills/lu
 
 TypeScript / Node.js SDK for integrating the LuaSkills runtime through the public JSON FFI surface.
 
-This source aligns with released LuaSkills core `0.8.2`. SQLite is registered and managed by the host; runtime installers fetch only the core and Lua assets.
+This source aligns with the LuaSkills core `0.9` series (first release `0.9.0`). SQLite is registered and managed by the host; runtime installers fetch only the core and Lua assets.
 
 The SDK wraps native library loading, JSON FFI buffers, engine lifecycle, formal skill roots, authority-aware management calls, skill config, provider callbacks, host-tool callbacks, and runtime asset installation. Hosts should not need to hand-write low-level FFI buffers or JSON envelopes for normal integration.
 
@@ -100,7 +100,7 @@ Run the example directly with `npm run example:embedded-candidate -- <absolute-c
 
 ## Installation
 
-The 0.8.2 SDK requires Node.js 24 LTS or newer.
+The 0.9.0 SDK requires Node.js 24 LTS or newer.
 
 ```bash
 npm install @luaskills/sdk
@@ -127,9 +127,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_as
 RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all
 ```
 
-Sync script targets are `all`, `luaskills`, and `lua`, with core `v0.8.2`. CLI database presets are only `none` and `host-callback`; the latter sets `sqlite_callback_mode: json` and still requires host registration.
+Sync script targets are `all`, `luaskills`, and `lua`. By default they install the newest published core patch of the `core_series` named in `contracts/embedded/v1/contract.json` (`0.9`) and require the archive's contract digest to match; `-LuaSkillsVersion` / `LUASKILLS_VERSION` pins an exact tag of that series. CLI database presets are only `none` and `host-callback`; the latter sets `sqlite_callback_mode: json` and still requires host registration.
 
-`install-runtime` downloads GitHub Release assets, verifies `.sha256` sidecars, extracts native files and Lua runtime packages, and writes:
+`install-runtime` downloads GitHub Release assets, verifies `.sha256` sidecars, extracts native files and Lua runtime packages, and writes the manifest below. Without `--luaskills-version` it installs the newest published core release of `DEFAULT_LUASKILLS_SERIES` (`0.9`); an explicit tag must be a `vX.Y.Z` release of that series. Before anything is copied into `runtimeRoot`, the archive's `contracts/embedded/v1/contract.sha256` must equal the SDK's `EMBEDDED_CONTRACT_SHA256`; a mismatch fails without trying another release.
 
 ```text
 runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
@@ -188,12 +188,29 @@ const pythonInstall = LuaSkillsClient.resolveManagedRuntimeInstall({
 
 The standalone fetch and debug tools accept the same split layout through `-DistributionRoot` or `MANAGED_RUNTIME_DISTRIBUTION_ROOT`, plus `--distribution-root` and `--environment-root` for validation.
 
-The SDK keeps LuaSkills core aligned with the SDK release and resolves runtime packages from the compatible `0.1` series by selecting the newest published patch automatically.
+### Read-only runtime root
+
+By default `temp_dir` and `download_cache_root` are derived from `runtimeRoot` (`temp` and `temp/downloads`). A host that installs `runtimeRoot` read-only sets `preserve_host_writable_dirs: true` and passes both paths explicitly; both are then required and nothing is derived in their place. The host creates `temp_dir`; the engine creates the download cache when it first needs it. See `examples/host-writable-dirs.mjs`.
+
+```ts
+const client = LuaSkillsClient.create({
+  runtimeRoot: "C:/Program Files/Host/lua_runtime",
+  hostOptions: {
+    preserve_host_writable_dirs: true,
+    temp_dir: "C:/Users/me/.host/cache/luaskills-temp",
+    download_cache_root: "C:/Users/me/.host/cache/luaskills-downloads",
+  },
+});
+```
+
+The SDK installs the newest published core patch of its series and resolves runtime packages from the compatible `0.1` series the same way.
 
 ## Version Alignment
 
-- Keep the SDK and LuaSkills core on the same current release line whenever possible.
-- The current SDK defaults to LuaSkills core tag `v0.8.2`.
+- SDK 0.9.x works with every LuaSkills core 0.9.x patch whose embedded contract digest matches the SDK's `EMBEDDED_CONTRACT_SHA256`; core patches keep the contract byte-identical, so they need no SDK release.
+- The installer picks the newest published core patch of `DEFAULT_LUASKILLS_SERIES` (`0.9`) and refuses it unless its packaged contract digest matches; there is no fallback to an older patch. An explicit core tag must belong to the series.
+- The embedded compatibility check accepts any `0.9.x` core version with the same contract digest, protocol, ABI and description versions.
+- A new core minor series changes the contract and needs a new SDK minor release.
 - Runtime packages and native dependencies still come from the split `LuaSkills/luaskills-packages` and related release assets.
 - SDK default host options pass `runtime_root`, null managed-root override slots, and the complete stable `managed_runtime_config`; LuaSkills derives the fixed data layout until the host explicitly overrides roots or policy.
 - Host tools live directly under `runtime_root/bin`, not `runtime_root/bin/tools`.
@@ -314,6 +331,7 @@ npm run example:lifecycle
 npm run example:runtime-lease
 npm run example:runtime-lease
 npm run example:provider-callback
+npm run example:host-writable-dirs
 ```
 
 The query, lifecycle, and persistent runtime-lease examples use the bundled fixture skill at `examples/fixture-runtime/user_skills/demo-standard-ffi-skill`. Install runtime assets into that root first:

@@ -537,7 +537,9 @@ class ReleaseGateTests(unittest.TestCase):
         (self.root / "original").mkdir()
         self.archive = self.root / "original" / Path(OPTIONS.archive).name
         self.archive.write_bytes(Path(OPTIONS.archive).read_bytes())
-        self.core_tag = RELEASE.default_tag(RELEASE.archive_files(self.archive)["src/runtime-assets.ts"].decode())
+        # Any patch of the packed default series is a valid release input; the fixture uses its first patch.
+        # 打包默认系列中的任一补丁版本都是有效发布输入；夹具使用其首个补丁版本。
+        self.core_tag = "v" + RELEASE.default_series(RELEASE.archive_files(self.archive)["src/runtime-assets.ts"].decode()) + ".0"
         self.core_version = self.core_tag.removeprefix("v")
         self.identity = {"schema_version": RELEASE.SDK_SCHEMA, "sdk_source_sha": "a" * 40,
             "workflow_source_sha": "a" * 40, "sdk_version": RELEASE.versions(ROOT), "core_tag": self.core_tag,
@@ -663,10 +665,17 @@ class ReleaseGateTests(unittest.TestCase):
         files = RELEASE.archive_files(self.archive)
         self.assertEqual(json.loads(files["package.json"])["version"], RELEASE.versions(ROOT))
         self.assertEqual(files["VERSION"].decode().strip(), RELEASE.versions(ROOT))
-        self.assertEqual(RELEASE.default_tag(files["src/runtime-assets.ts"].decode()),
-                         RELEASE.default_tag(files["dist/runtime-assets.js"].decode()))
+        self.assertEqual(RELEASE.default_series(files["src/runtime-assets.ts"].decode()),
+                         RELEASE.default_series(files["dist/runtime-assets.js"].decode()))
+        self.assertEqual(RELEASE.default_series(files["src/runtime-assets.ts"].decode()),
+                         json.loads(files["contracts/embedded/v1/contract.json"])["core_series"])
         self.assertIn("examples/embedded-candidate.mjs", files)
         RELEASE.validate_artifact(self.identity, self.archive)
+        series = RELEASE.default_series(files["src/runtime-assets.ts"].decode())
+        major, minor = (int(part) for part in series.split("."))
+        RELEASE.validate_artifact({**self.identity, "core_tag": f"v{series}.9"}, self.archive)
+        with self.assertRaisesRegex(ValueError, "Artifact default core series mismatch"):
+            RELEASE.validate_artifact({**self.identity, "core_tag": f"v{major}.{minor + 1}.0"}, self.archive)
 
     def test_real_distribution_verifier_and_artifact_identity(self):
         """Run the real archive/codec verifier while source-state substitution stays unit-only.
@@ -674,7 +683,7 @@ class ReleaseGateTests(unittest.TestCase):
         """
         files = RELEASE.archive_files(self.archive)
         frozen = {k: v for k, v in self.identity.items() if k not in ("archive", "tgz_sha256")}
-        frozen["core_tag"] = RELEASE.default_tag(files["src/runtime-assets.ts"].decode())
+        frozen["core_tag"] = "v" + RELEASE.default_series(files["src/runtime-assets.ts"].decode()) + ".7"
         freeze_file = self.root / "freeze.json"
         RELEASE.write_json(freeze_file, frozen)
         args = SimpleNamespace(freeze=freeze_file, archive=self.archive, output=self.root / "real-artifact.json")
@@ -846,14 +855,33 @@ class ReleaseGateTests(unittest.TestCase):
                 RELEASE.parse_native(stdout, decoded)
 
     def test_source_workflow_version_and_default_tag_failures(self):
-        """Fail frozen source/workflow drift and actual mismatched SDK/core default tags.
-        冻结源码、工作流漂移及实际 SDK、核心默认标签不一致时失败。
+        """Fail frozen source/workflow drift and core tags outside the SDK default core series.
+        冻结源码、工作流漂移及核心标签不属于 SDK 默认核心系列时失败。
         """
+        series = RELEASE.default_series((ROOT / "src/runtime-assets.ts").read_text(encoding="utf-8"))
+        major, minor = (int(part) for part in series.split("."))
         args = SimpleNamespace(core_root=OPTIONS.core_root, core_tag="v999.0.0", core_commit="b" * 40,
                                sdk_source_sha="a" * 40, workflow_source_sha="a" * 40, output=self.root / "freeze.json")
-        with patch.object(RELEASE, "run", side_effect=["a" * 40, ""]), patch.object(RELEASE, "authority", return_value=CORE):
-            with self.assertRaisesRegex(ValueError, "Default core asset tag"):
+        for tag in ("v999.0.0", f"v{major}.{minor + 1}.0", f"v{major + 1}.{minor}.0"):
+            args.core_tag = tag
+            with patch.object(RELEASE, "run", side_effect=["a" * 40, ""]), patch.object(RELEASE, "authority", return_value=CORE):
+                with self.assertRaisesRegex(ValueError, "outside the default core series"):
+                    RELEASE.freeze(args)
+        for tag in (f"{series}.0", f"v{series}", f"v{series}.0-rc.1", f"v{series}.01"):
+            args.core_tag = tag
+            with patch.object(RELEASE, "run", side_effect=["a" * 40, ""]), patch.object(RELEASE, "authority", return_value=CORE):
+                with self.assertRaisesRegex(ValueError, "Explicit core release tag required"):
+                    RELEASE.freeze(args)
+        self.assertFalse(args.output.exists())
+        # Every patch of the series is accepted without an SDK source change.
+        # 系列内任一补丁版本均被接受，无需修改 SDK 源码。
+        for tag in (f"v{series}.0", f"v{series}.12"):
+            args.core_tag = tag
+            with patch.object(RELEASE, "run", side_effect=["a" * 40, ""]), patch.object(RELEASE, "authority", return_value=CORE):
                 RELEASE.freeze(args)
+            self.assertEqual(RELEASE.read_json(args.output)["core_tag"], tag)
+            args.output.unlink()
+        args.core_tag = f"v{series}.0"
         args.workflow_source_sha = "c" * 40
         with self.assertRaisesRegex(ValueError, "Workflow source"):
             RELEASE.freeze(args)

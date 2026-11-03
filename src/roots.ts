@@ -63,13 +63,16 @@ export class RuntimeRoots {
   /**
    * Create runtime directories needed by the default SDK host options and root chain.
    * 创建默认 SDK 宿主选项和 root 链所需的运行时目录。
+   * With preserveHostWritableDirs the derived temp and download-cache directories are skipped,
+   * because the host keeps its own `temp_dir` and `download_cache_root` outside runtimeRoot.
+   * 设置 preserveHostWritableDirs 时跳过推导的临时与下载缓存目录，
+   * 因为宿主在 runtimeRoot 之外保留自有 `temp_dir` 与 `download_cache_root`。
    */
-  static ensureLayout(runtimeRoot: string, skillRoots: RuntimeSkillRoot[] = RuntimeRoots.standard(runtimeRoot)): void {
+  static ensureLayout(runtimeRoot: string, skillRoots: RuntimeSkillRoot[] = RuntimeRoots.standard(runtimeRoot), options: { preserveHostWritableDirs?: boolean } = {}): void {
     const absoluteRoot = resolve(runtimeRoot);
     const directories = [
       absoluteRoot,
-      join(absoluteRoot, "temp"),
-      join(absoluteRoot, "temp", "downloads"),
+      ...(options.preserveHostWritableDirs ? [] : [join(absoluteRoot, "temp"), join(absoluteRoot, "temp", "downloads")]),
       join(absoluteRoot, "resources"),
       join(absoluteRoot, "lua_packages"),
       join(absoluteRoot, "bin"),

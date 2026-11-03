@@ -1,4 +1,4 @@
-import { EMBEDDED_CONTRACT_SHA256, EMBEDDED_CORE_VERSION, EMBEDDED_DESCRIPTION_MAX_BYTES, EMBEDDED_DESCRIPTION_VERSION, EMBEDDED_PROTOCOL_VERSION, EMBEDDED_REQUIRED_CAPABILITIES, EMBEDDED_ROOT_COMMANDS, EMBEDDED_RUNTIME_COMMANDS, type OutputCoreDescription, type OutputEmbeddedBuildIdentity, type OutputExecutionBackend } from "./embedded-contract.js";
+import { EMBEDDED_CONTRACT_SHA256, EMBEDDED_CORE_SERIES, EMBEDDED_DESCRIPTION_MAX_BYTES, EMBEDDED_DESCRIPTION_VERSION, EMBEDDED_PROTOCOL_VERSION, EMBEDDED_REQUIRED_CAPABILITIES, EMBEDDED_ROOT_COMMANDS, EMBEDDED_RUNTIME_COMMANDS, type OutputCoreDescription, type OutputEmbeddedBuildIdentity, type OutputExecutionBackend } from "./embedded-contract.js";
 import { decodeEmbeddedJson } from "./embedded-json.js";
 
 /** Reject incompatible native metadata before creating or borrowing native ownership.
@@ -42,6 +42,15 @@ function digest(value: unknown, field: string): string {
 function exact<T extends string | number>(value: unknown, expected: T, field: string): T {
   if (value !== expected) throw new EmbeddedCompatibilityError(`Native ${field} mismatch; expected ${expected}`);
   return expected;
+}
+
+/** Require an exact `major.minor.patch` core version inside the generated release series; return it unchanged.
+ * 要求精确的 `major.minor.patch` 核心版本属于生成的发布系列；原样返回该版本。 */
+function seriesVersion(value: unknown, series: string, field: string): string {
+  const version = text(value, field);
+  const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(version);
+  if (match === null || `${match[1]}.${match[2]}` !== series) throw new EmbeddedCompatibilityError(`Native ${field} mismatch; expected a ${series}.x release`);
+  return version;
 }
 
 /** Validate unique nonempty names and required membership; return independent names in native order.
@@ -98,7 +107,9 @@ export function decodeCoreDescription(bytes: Uint8Array, pointerBytes: number): 
   if (backends.some((backend) => !Object.hasOwn(allowedBackends, backend))) throw new EmbeddedCompatibilityError("Unknown native execution backend");
   return {
     description_version: exact(description.description_version, EMBEDDED_DESCRIPTION_VERSION, "description_version"),
-    core_version: exact(description.core_version, EMBEDDED_CORE_VERSION, "core_version"),
+    // Any patch of the contract's series is accepted; contract_sha256 above still binds the exact contract bytes.
+    // 接受契约所属系列的任一补丁版本；上方 contract_sha256 仍绑定精确契约字节。
+    core_version: seriesVersion(description.core_version, EMBEDDED_CORE_SERIES, "core_version"),
     protocol_version: exact(description.protocol_version, EMBEDDED_PROTOCOL_VERSION, "protocol_version"),
     abi_structure_version: exact(description.abi_structure_version, EMBEDDED_PROTOCOL_VERSION, "abi_structure_version"),
     commands: names(description.commands, EMBEDDED_ROOT_COMMANDS, "commands"),

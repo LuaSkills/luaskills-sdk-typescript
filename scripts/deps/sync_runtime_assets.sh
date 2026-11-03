@@ -13,13 +13,16 @@ TARGET="${1:-all}"
 # RuntimeRoot receives all synchronized assets.
 # RuntimeRoot 接收全部同步资产。
 RUNTIME_ROOT="${RUNTIME_ROOT:-output}"
-# LuaSkillsVersion stores the exact LuaSkills release tag.
-# LuaSkillsVersion 保存精确的 LuaSkills 发布标签。
-LUASKILLS_VERSION="${LUASKILLS_VERSION:-v0.8.2}"
+# LuaSkillsSeries stores the core major.minor series; empty uses core_series from contracts/embedded/v1/contract.json.
+# LuaSkillsSeries 保存核心 major.minor 系列；为空时使用 contracts/embedded/v1/contract.json 的 core_series。
+LUASKILLS_SERIES="${LUASKILLS_SERIES:-}"
+# LuaSkillsVersion stores one optional exact core tag inside the series; empty installs the newest published patch.
+# LuaSkillsVersion 保存系列内可选的精确核心标签；为空时安装最新已发布补丁版本。
+LUASKILLS_VERSION="${LUASKILLS_VERSION:-}"
 
 case "$TARGET" in
   all|luaskills)
-    RUNTIME_ROOT="$RUNTIME_ROOT" LUASKILLS_VERSION="$LUASKILLS_VERSION" "$REPOSITORY_ROOT/scripts/ffi/fetch_ffi.sh"
+    RUNTIME_ROOT="$RUNTIME_ROOT" LUASKILLS_SERIES="$LUASKILLS_SERIES" LUASKILLS_VERSION="$LUASKILLS_VERSION" "$REPOSITORY_ROOT/scripts/ffi/fetch_ffi.sh"
     ;;
 esac
 

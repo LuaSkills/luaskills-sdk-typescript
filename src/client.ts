@@ -241,7 +241,9 @@ export class LuaSkillsClient {
     const engineOptions = createEngineOptions(options);
     if (!options.engineOptions && (options.ensureRuntimeLayout ?? true)) {
       const runtimeRoot = resolve(options.runtimeRoot ?? join(process.cwd(), "luaskills-runtime"));
-      RuntimeRoots.ensureLayout(runtimeRoot);
+      // Host-kept writable directories live outside runtimeRoot, so the derived temp layout is not created.
+      // 宿主保留的可写目录位于 runtimeRoot 之外，因此不创建推导的临时目录布局。
+      RuntimeRoots.ensureLayout(runtimeRoot, undefined, { preserveHostWritableDirs: engineOptions.host_options.preserve_host_writable_dirs });
     }
     const result = ffi.callJson<EngineHandleResult>("luaskills_ffi_engine_new_json", {
       options: engineOptions,
@@ -1883,6 +1885,9 @@ export function defaultHostOptions(runtimeRoot: string): LuaRuntimeHostOptions {
     host_provided_ffi_root: null,
     system_lua_lib_dir: null,
     download_cache_root: null,
+    // Derived writable directories stay the default; hosts opt in to keep their own temp and cache roots.
+    // 默认仍使用推导的可写目录；宿主显式开启后才保留自有临时与缓存根。
+    preserve_host_writable_dirs: false,
     dependency_dir_name: "",
     state_dir_name: "",
     database_dir_name: "",

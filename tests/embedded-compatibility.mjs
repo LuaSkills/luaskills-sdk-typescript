@@ -21,7 +21,7 @@ const native = { skip: !process.env.LUASKILLS_LIB };
 function description() {
   return {
     description_version: contract.EMBEDDED_DESCRIPTION_VERSION,
-    core_version: contract.EMBEDDED_CORE_VERSION,
+    core_version: `${contract.EMBEDDED_CORE_SERIES}.0`,
     protocol_version: contract.EMBEDDED_PROTOCOL_VERSION,
     abi_structure_version: contract.EMBEDDED_PROTOCOL_VERSION,
     commands: [...contract.EMBEDDED_ROOT_COMMANDS], runtime_commands: [...contract.EMBEDDED_RUNTIME_COMMANDS],
@@ -72,6 +72,23 @@ test("mismatched metadata fails before binding constructor or allocating native 
     const counts = boundary({ bytes: Buffer.from(JSON.stringify(invalid)) }, (create) => assert.throws(create, EmbeddedCompatibilityError));
     assert.equal(counts.created, 0, field); assert.equal(counts.released, 0, field);
   }
+});
+
+test("any core patch of the contract series is accepted and any other core version is rejected", () => {
+  const series = contract.EMBEDDED_CORE_SERIES;
+  const [major, minor] = series.split(".").map(Number);
+  for (const version of [`${series}.0`, `${series}.3`, `${series}.12`]) {
+    const accepted = description(); accepted.core_version = version;
+    assert.equal(decodeCoreDescription(Buffer.from(JSON.stringify(accepted)), koffi.sizeof("void *")).core_version, version);
+  }
+  for (const version of [`${major}.${minor + 1}.0`, `${major + 1}.${minor}.0`, `${major}.${minor - 1}.9`, series, `v${series}.0`, `${series}.0-rc.1`, `${series}.01`, `${series}.0.1`, "", 9]) {
+    const rejected = description(); rejected.core_version = version;
+    assert.throws(() => decodeCoreDescription(Buffer.from(JSON.stringify(rejected)), koffi.sizeof("void *")), EmbeddedCompatibilityError, String(version));
+  }
+  // The series check never relaxes the exact contract digest.
+  // 系列检查绝不放宽精确契约摘要。
+  const otherContract = description(); otherContract.core_version = `${series}.5`; otherContract.build.contract_sha256 = "0".repeat(64);
+  assert.throws(() => decodeCoreDescription(Buffer.from(JSON.stringify(otherContract)), koffi.sizeof("void *")), /contract_sha256 mismatch/);
 });
 
 test("required metadata fields, strict JSON, and explicit float versions are rejected", () => {

@@ -17,6 +17,14 @@ LUASKILLS_REPO="${LUASKILLS_REPO:-LuaSkills/luaskills}"
 # LuaSkillsVersion 保存 LuaSkills FFI SDK 资产的 GitHub Release 标签。
 LUASKILLS_VERSION="${LUASKILLS_VERSION:-}"
 
+# LuaSkillsSeries stores the core major.minor series; empty selects the embedded contract copy's core_series.
+# LuaSkillsSeries 保存核心 major.minor 系列；为空时使用嵌入式契约副本的 core_series。
+LUASKILLS_SERIES="${LUASKILLS_SERIES:-}"
+
+# ContractDirectory holds the embedded contract copy whose series and digest the installed core must match.
+# ContractDirectory 保存嵌入式契约副本，已安装核心必须匹配其系列与摘要。
+CONTRACT_DIRECTORY="$PROJECT_ROOT/contracts/embedded/v1"
+
 ensure_dir() {
   # Create one directory when it does not exist.
   # 在目录不存在时创建该目录。
@@ -109,13 +117,92 @@ PY
   fi
 }
 
+resolve_luaskills_series() {
+  # Resolve the core series from input or the embedded contract copy; print nothing when neither exists.
+  # 从输入参数或嵌入式契约副本解析核心系列；两者都不存在时不输出。
+  if [ -n "$LUASKILLS_SERIES" ]; then
+    printf '%s\n' "$LUASKILLS_SERIES"
+    return 0
+  fi
+  if [ -f "$CONTRACT_DIRECTORY/contract.json" ]; then
+    python3 -c '
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle)["core_series"])
+' "$CONTRACT_DIRECTORY/contract.json"
+  fi
+}
+
+resolve_release_tag_for_series() {
+  # Resolve the newest published GitHub release tag inside one major.minor series.
+  # 解析一个 major.minor 协议线内最新的已发布 GitHub release 标签。
+  local repo="$1"
+  local series="$2"
+  curl -fsSL "https://api.github.com/repos/${repo}/releases?per_page=100" | python3 -c '
+import json
+import re
+import sys
+
+series = sys.argv[1]
+repo = sys.argv[2]
+if not re.fullmatch(r"\d+\.\d+", series):
+    raise SystemExit(f"unsupported core series: {series}")
+
+matches = []
+for release in json.load(sys.stdin):
+    if release.get("draft") or release.get("prerelease"):
+        continue
+    tag = str(release.get("tag_name", ""))
+    normalized = tag[1:] if tag.startswith("v") else tag
+    if not re.fullmatch(r"\d+\.\d+\.\d+", normalized):
+        continue
+    major, minor, patch = (int(part) for part in normalized.split("."))
+    if f"{major}.{minor}" != series:
+        continue
+    matches.append(((major, minor, patch), tag))
+
+if not matches:
+    raise SystemExit(f"no published release found for {repo} series {series}")
+
+matches.sort(key=lambda item: item[0], reverse=True)
+print(matches[0][1])
+' "$series" "$repo"
+}
+
+tag_in_series() {
+  # Succeed only when the tag is an exact vX.Y.Z release whose X.Y equals the series.
+  # 仅当标签是 X.Y 等于系列的精确 vX.Y.Z 发布时成功。
+  local tag="$1"
+  local series="$2"
+  case "$tag" in
+    "v$series".*) ;;
+    *) return 1 ;;
+  esac
+  local patch="${tag#"v$series."}"
+  case "$patch" in
+    ""|*[!0-9]*) return 1 ;;
+  esac
+  [ "$patch" = "0" ] || [ "${patch#0}" = "$patch" ]
+}
+
 resolve_luaskills_version() {
-  # Resolve the FFI SDK release tag from input or the local Cargo.toml.
-  # 从输入参数或本地 Cargo.toml 解析 FFI SDK 发布标签。
+  # Resolve the FFI SDK release tag from input, the newest patch of the core series, or the local Cargo.toml.
+  # 从输入参数、核心系列最新补丁版本或本地 Cargo.toml 解析 FFI SDK 发布标签。
   local explicit_tag="$1"
+  local series
+  series="$(resolve_luaskills_series)" || return 1
   if [ -n "$explicit_tag" ]; then
+    if [ -n "$series" ] && ! tag_in_series "$explicit_tag" "$series"; then
+      echo "LuaSkills core tag '$explicit_tag' is not a vX.Y.Z release of series $series required by this SDK" >&2
+      return 1
+    fi
     printf '%s\n' "$explicit_tag"
     return 0
+  fi
+  if [ -n "$series" ]; then
+    resolve_release_tag_for_series "$LUASKILLS_REPO" "$series"
+    return
   fi
   if [ -f "$PROJECT_ROOT/Cargo.toml" ]; then
     python3 - "$PROJECT_ROOT/Cargo.toml" <<'PY'
@@ -195,6 +282,21 @@ install_luaskills_ffi() {
   if [ -z "$extracted_library" ]; then
     echo "LuaSkills dynamic library was not found in downloaded $asset_name" >&2
     return 1
+  fi
+  # The packaged contract digest must equal this SDK's copy; a different core contract is never installed.
+  # 包内契约摘要必须等于本 SDK 副本；绝不安装契约不同的核心。
+  if [ -f "$CONTRACT_DIRECTORY/contract.sha256" ]; then
+    local expected_contract="" packaged_contract=""
+    read -r expected_contract _ < "$CONTRACT_DIRECTORY/contract.sha256" || true
+    if [ ! -f "$extract_dir/contracts/embedded/v1/contract.sha256" ]; then
+      echo "$asset_name from $LUASKILLS_REPO@$LUASKILLS_VERSION does not contain contracts/embedded/v1/contract.sha256" >&2
+      return 1
+    fi
+    read -r packaged_contract _ < "$extract_dir/contracts/embedded/v1/contract.sha256" || true
+    if [ -z "$expected_contract" ] || [ "$packaged_contract" != "$expected_contract" ]; then
+      echo "LuaSkills core $LUASKILLS_VERSION packages embedded contract $packaged_contract, but this SDK requires $expected_contract" >&2
+      return 1
+    fi
   fi
   if [ -d "$extract_dir/include" ]; then
     ensure_dir "$RUNTIME_ROOT/include"

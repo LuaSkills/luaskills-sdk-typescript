@@ -358,13 +358,23 @@ def relative_member(name):
     return name
 
 
-def default_tag(text):
-    """Read the unique declared DEFAULT_LUASKILLS_VERSION literal; return its tag.
-    读取唯一声明的 DEFAULT_LUASKILLS_VERSION 字面量；返回其标签。
+def default_series(text):
+    """Read the unique declared DEFAULT_LUASKILLS_SERIES literal; return its major.minor series.
+    读取唯一声明的 DEFAULT_LUASKILLS_SERIES 字面量；返回其 major.minor 系列。
     """
-    matches = re.findall(r'export const DEFAULT_LUASKILLS_VERSION\s*=\s*"([^"\n]+)";', text)
-    require(len(matches) == 1, "Expected one default core asset declaration")
+    matches = re.findall(r'export const DEFAULT_LUASKILLS_SERIES\s*=\s*"([^"\n]+)";', text)
+    require(len(matches) == 1, "Expected one default core series declaration")
+    require(re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", matches[0]), "Invalid default core series")
     return matches[0]
+
+
+def tag_series(tag):
+    """Require an exact vX.Y.Z core tag; return its X.Y release series.
+    要求精确的 vX.Y.Z 核心标签；返回其 X.Y 发布系列。
+    """
+    match = re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag)
+    require(match, "Explicit core release tag required")
+    return f"{match.group(1)}.{match.group(2)}"
 
 
 def versions(root):
@@ -392,9 +402,12 @@ def freeze(args):
     require(not run(["git", "status", "--porcelain", "--untracked-files=no"]), "Tracked SDK source must be clean before building")
     authority(args.core_root, args.core_commit)
     version = versions(ROOT)
-    require(re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", args.core_tag), "Explicit core release tag required")
-    require(default_tag((ROOT / "src/runtime-assets.ts").read_text(encoding="utf-8")) == args.core_tag,
-            "Default core asset tag differs from explicit prerequisite tag")
+    # Core patches share one contract, so the SDK names a series and the release input must belong to it.
+    # 核心补丁版本共享同一契约，因此 SDK 声明系列，发布输入必须属于该系列。
+    series = default_series((ROOT / "src/runtime-assets.ts").read_text(encoding="utf-8"))
+    require(read_json(ROOT / "contracts/embedded/v1/contract.json")["core_series"] == series,
+            "Default core series differs from the embedded contract series")
+    require(tag_series(args.core_tag) == series, "Explicit core tag is outside the default core series")
     write_json(args.output, {"schema_version": SDK_SCHEMA, "sdk_source_sha": args.sdk_source_sha,
                            "workflow_source_sha": args.workflow_source_sha, "sdk_version": version,
                            "core_tag": args.core_tag, "core_commit": args.core_commit,
@@ -431,7 +444,7 @@ def artifact(args):
     require(json.loads(files["package.json"], object_pairs_hook=pairs)["version"] == frozen["sdk_version"], "Packed version mismatch")
     require(files["VERSION"].decode().strip() == frozen["sdk_version"], "Packed VERSION mismatch")
     for name in ("src/runtime-assets.ts", "dist/runtime-assets.js"):
-        require(default_tag(files[name].decode()) == frozen["core_tag"], "Packed default asset tag mismatch")
+        require(default_series(files[name].decode()) == tag_series(frozen["core_tag"]), "Packed default core series mismatch")
     # Reuse the established distribution/codec verifier against the archive built once in this checkout.
     # 对本检出只构建一次的归档复用既有分发、编码器验证器。
     run(["node", ROOT / "scripts/verify-embedded-distribution.mjs", archive])
@@ -458,8 +471,8 @@ def validate_artifact(record, archive):
     package = json.loads(files["package.json"], object_pairs_hook=pairs)
     require(package["name"] == "@luaskills/sdk" and package["version"] == record["sdk_version"]
             and files["VERSION"].decode().strip() == record["sdk_version"], "Artifact package version/name mismatch")
-    require(default_tag(files["src/runtime-assets.ts"].decode()) == record["core_tag"]
-            and default_tag(files["dist/runtime-assets.js"].decode()) == record["core_tag"], "Artifact default core asset tag mismatch")
+    require(default_series(files["src/runtime-assets.ts"].decode()) == tag_series(record["core_tag"])
+            and default_series(files["dist/runtime-assets.js"].decode()) == tag_series(record["core_tag"]), "Artifact default core series mismatch")
 
 
 def prerequisites(record, core, identity):

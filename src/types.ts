@@ -270,6 +270,15 @@ export type LuaRuntimeHostOptions = {
    */
   download_cache_root: string | null;
   /**
+   * Keep the host-set `temp_dir` and `download_cache_root` instead of deriving them from
+   * `runtime_root`, so a read-only runtime root never receives transient files or downloads.
+   * Both paths are then required; the host creates `temp_dir`, the engine creates the cache.
+   * 保留宿主设置的 `temp_dir` 与 `download_cache_root`，不再从 `runtime_root` 推导，
+   * 使只读运行时根绝不接收临时文件或下载内容。此时两个路径均为必填；宿主创建 `temp_dir`，
+   * 引擎创建下载缓存。
+   */
+  preserve_host_writable_dirs: boolean;
+  /**
    * Dependency sibling directory name.
    * 依赖兄弟目录名称。
    */

@@ -64,6 +64,12 @@ node .\examples\runtime-lease.mjs
 node .\examples\provider-callback.mjs
 ```
 
+`host-writable-dirs.mjs` 通过 `preserve_host_writable_dirs: true` 把 `temp_dir` 与 `download_cache_root` 放在 `runtimeRoot` 之外的宿主自有目录，使 runtime root 可以保持只读。宿主创建 `temp_dir`；引擎创建下载缓存。可通过 `LUASKILLS_EXAMPLE_WRITABLE_ROOT` 指定可写目录（默认新建临时目录）。
+
+```powershell
+node .\examples\host-writable-dirs.mjs
+```
+
 模型 callback 对接见主 [SDK README](../README_cn.md#模型-callback)。通用示例不直接调用真实模型 provider，因为模型凭证、provider 选择、预算与脱敏策略都归宿主管理。
 
 ## Fixture Skill

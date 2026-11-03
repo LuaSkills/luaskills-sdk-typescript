@@ -144,6 +144,16 @@ test("unknown shape, incompatible definitions and generated-name collisions fail
   assert.throws(() => generate(collision, bytes), /Generated name collision/);
 });
 
+test("the contract names a major.minor core series instead of an exact core version", () => {
+  assert.equal(embeddedContract.EMBEDDED_CORE_SERIES, contract.core_series);
+  assert.equal(Object.hasOwn(embeddedContract, "EMBEDDED_CORE_VERSION"), false);
+  for (const series of [undefined, 9, "0.9.0", "v0.9", "0.09", ""]) {
+    const changed = structuredClone(contract);
+    changed.core_series = series;
+    assert.throws(() => generate(changed, bytes), /Invalid core release series/, String(series));
+  }
+});
+
 test("command metadata cannot drift together away from actual request enum", () => {
   const changed = structuredClone(contract);
   changed.runtime_commands.push("future_command");

@@ -7,6 +7,7 @@ import { basename, dirname, isAbsolute, join, posix as posixPath, relative, reso
 import { spawn, spawnSync } from "node:child_process";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
+import { EMBEDDED_CONTRACT_SHA256 } from "./embedded-contract.js";
 import type { LuaRuntimeHostOptions } from "./types.js";
 
 /**
@@ -22,10 +23,12 @@ const SHA256_HEX_PATTERN = /^[0-9a-fA-F]{64}$/;
 const SHA512_BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 
 /**
- * Default LuaSkills release tag used by SDK runtime installation.
- * SDK 运行时安装使用的默认 LuaSkills 发布标签。
+ * LuaSkills core release series (`major.minor`) installed by SDK runtime installation; it equals the embedded
+ * contract's `core_series`. Without an explicit tag the installer picks the newest published patch of this series.
+ * SDK 运行时安装使用的 LuaSkills 核心发布系列（`major.minor`），等于嵌入式契约的 `core_series`。
+ * 未指定精确标签时，安装器选择该系列中最新的已发布补丁版本。
  */
-export const DEFAULT_LUASKILLS_VERSION = "v0.8.2";
+export const DEFAULT_LUASKILLS_SERIES = "0.9";
 
 /**
  * Default luaskills-packages release series used by SDK runtime installation.
@@ -237,8 +240,8 @@ export interface RuntimeInstallOptions {
    */
   database?: RuntimeDatabasePreset | `${RuntimeDatabasePreset}`;
   /**
-   * LuaSkills release tag.
-   * LuaSkills 发布标签。
+   * Exact LuaSkills core release tag `vX.Y.Z` inside DEFAULT_LUASKILLS_SERIES; omitted resolves the newest published patch.
+   * DEFAULT_LUASKILLS_SERIES 内的精确 LuaSkills 核心发布标签 `vX.Y.Z`；省略时解析最新已发布补丁版本。
    */
   luaskillsVersion?: string;
   /**
@@ -427,7 +430,12 @@ export function buildRuntimeInstallManifest(options: RuntimeInstallOptions): Run
       options.luaRuntimeRepo ?? "LuaSkills/luaskills-packages",
       options.luaRuntimeSeries ?? DEFAULT_LUASKILLS_PACKAGES_SERIES,
     );
-  const assets = buildRuntimeAssetDescriptors({ ...options, database, runtimeRoot, luaRuntimeVersion: resolvedLuaRuntimeVersion }, platform);
+  // The core tag is resolved only when the FFI archive is requested, so Lua-only plans never query core releases.
+  // 仅在请求 FFI 归档时解析核心标签，使仅 Lua 的计划从不查询核心发布。
+  const resolvedLuaSkillsVersion = (options.includeLuaSkillsFfi ?? true)
+    ? resolveLuaSkillsCoreTag(options.luaskillsRepo ?? "LuaSkills/luaskills", options.luaskillsVersion)
+    : options.luaskillsVersion;
+  const assets = buildRuntimeAssetDescriptors({ ...options, database, runtimeRoot, luaRuntimeVersion: resolvedLuaRuntimeVersion, luaskillsVersion: resolvedLuaSkillsVersion }, platform);
   return {
     schema_version: 1,
     generated_at: new Date().toISOString(),
@@ -736,7 +744,7 @@ function buildRuntimeAssetDescriptors(options: RuntimeInstallOptions & { databas
   }
   if (options.includeLuaSkillsFfi ?? true) {
     const assetName = `luaskills-ffi-sdk-${platform.platform_key}.tar.gz`;
-    assets.push(releaseAsset("luaskills_ffi", options.luaskillsRepo ?? "LuaSkills/luaskills", options.luaskillsVersion ?? DEFAULT_LUASKILLS_VERSION, assetName, `libs/${platform.luaskills_library_name}`));
+    assets.push(releaseAsset("luaskills_ffi", options.luaskillsRepo ?? "LuaSkills/luaskills", options.luaskillsVersion!, assetName, `libs/${platform.luaskills_library_name}`));
   }
   return assets;
 }
@@ -761,21 +769,116 @@ function releaseAsset(role: RuntimeAssetRole, repository: string, version: strin
 }
 
 /**
+ * Release metadata fields read from the GitHub releases listing when choosing a series tag.
+ * 选择系列标签时从 GitHub 发布列表读取的发布元数据字段。
+ */
+export interface ReleaseListingEntry {
+  /**
+   * Git tag name such as v0.9.3.
+   * 形如 v0.9.3 的 Git 标签名称。
+   */
+  tag_name: string;
+  /**
+   * Whether the release is still an unpublished draft.
+   * 发布是否仍为未发布草稿。
+   */
+  draft: boolean;
+  /**
+   * Whether the release is marked as a prerelease.
+   * 发布是否标记为预发布。
+   */
+  prerelease: boolean;
+}
+
+/**
+ * Parse one `major.minor` release series; reject any other shape.
+ * 解析单个 `major.minor` 发布系列；拒绝其他形状。
+ */
+function parseReleaseSeries(series: string): [number, number] {
+  const match = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(series);
+  if (!match) {
+    throw new Error(`Invalid release series: ${series}`);
+  }
+  return [Number(match[1]), Number(match[2])];
+}
+
+/**
+ * Parse one `vX.Y.Z` or `X.Y.Z` release tag into numeric parts; return null for any other tag shape.
+ * 将 `vX.Y.Z` 或 `X.Y.Z` 发布标签解析为数值部分；其他标签形状返回 null。
+ */
+function parseReleaseTag(tag: string): [number, number, number] | null {
+  const match = /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(tag);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+/**
+ * Choose the newest published (non-draft, non-prerelease) release tag of one `major.minor` series.
+ * 选择单个 `major.minor` 系列中最新的已发布（非草稿、非预发布）标签。
+ * @param releases Release entries from the GitHub releases listing.
+ * GitHub 发布列表中的发布条目。
+ * @param series Release series such as 0.9.
+ * 形如 0.9 的发布系列。
+ * @param repository Repository name used only in the diagnostic.
+ * 仅用于诊断信息的仓库名称。
+ * @returns The newest matching tag exactly as published; no other series is ever considered.
+ * 按发布原样返回最新匹配标签；从不考虑其他系列。
+ */
+export function selectLatestReleaseTagForSeries(releases: readonly ReleaseListingEntry[], series: string, repository = "the repository"): string {
+  const [major, minor] = parseReleaseSeries(series);
+  let newest: { tag: string; patch: number } | null = null;
+  for (const release of releases) {
+    if (release.draft || release.prerelease) {
+      continue;
+    }
+    const parts = parseReleaseTag(String(release.tag_name ?? ""));
+    if (!parts || parts[0] !== major || parts[1] !== minor) {
+      continue;
+    }
+    if (!newest || parts[2] > newest.patch) {
+      newest = { tag: release.tag_name, patch: parts[2] };
+    }
+  }
+  if (!newest) {
+    throw new Error(`No published release found in series ${series} for ${repository}`);
+  }
+  return newest.tag;
+}
+
+/**
+ * Require one explicit LuaSkills core tag `vX.Y.Z` to belong to a release series; return it unchanged.
+ * 要求单个显式 LuaSkills 核心标签 `vX.Y.Z` 属于发布系列；原样返回该标签。
+ */
+function requireCoreTagInSeries(tag: string, series: string): string {
+  const [major, minor] = parseReleaseSeries(series);
+  const parts = tag.startsWith("v") ? parseReleaseTag(tag) : null;
+  if (!parts || parts[0] !== major || parts[1] !== minor) {
+    throw new Error(`LuaSkills core tag ${JSON.stringify(tag)} is not a vX.Y.Z release of series ${series} required by this SDK`);
+  }
+  return tag;
+}
+
+/**
+ * Return the explicit core tag after checking its series, or the newest published core patch of DEFAULT_LUASKILLS_SERIES.
+ * 校验系列后返回显式核心标签，或返回 DEFAULT_LUASKILLS_SERIES 中最新的已发布核心补丁版本。
+ */
+function resolveLuaSkillsCoreTag(repository: string, explicitTag: string | undefined): string {
+  if (explicitTag !== undefined) {
+    return requireCoreTagInSeries(explicitTag, DEFAULT_LUASKILLS_SERIES);
+  }
+  return resolveLatestReleaseTagForSeriesSync(repository, DEFAULT_LUASKILLS_SERIES);
+}
+
+/**
  * Resolve the newest published release tag inside one semantic-version series.
  * 解析单个语义化版本协议线中的最新已发布标签。
+ * The child process only fetches the listing; selection stays in selectLatestReleaseTagForSeries.
+ * 子进程只负责获取列表；选择逻辑保留在 selectLatestReleaseTagForSeries 中。
  */
 function resolveLatestReleaseTagForSeriesSync(repository: string, series: string): string {
+  parseReleaseSeries(series);
   const apiScript = `
 const https = require("node:https");
 const repository = process.argv[1];
-const series = process.argv[2];
-const [majorText, minorText] = series.split(".");
-const major = Number.parseInt(majorText, 10);
-const minor = Number.parseInt(minorText, 10);
-if (!Number.isFinite(major) || !Number.isFinite(minor)) {
-  console.error("Invalid release series: " + series);
-  process.exit(2);
-}
 const request = https.get(
   "https://api.github.com/repos/" + repository + "/releases?per_page=100",
   {
@@ -794,29 +897,17 @@ const request = https.get(
         process.exit(3);
       }
       const releases = JSON.parse(body);
-      const candidates = releases
-        .filter((release) => !release.draft && !release.prerelease)
-        .map((release) => {
-          const tag = String(release.tag_name || "");
-          const match = /^v?(\\d+)\\.(\\d+)\\.(\\d+)$/.exec(tag);
-          if (!match) {
-            return null;
-          }
-          const parsedMajor = Number.parseInt(match[1], 10);
-          const parsedMinor = Number.parseInt(match[2], 10);
-          const parsedPatch = Number.parseInt(match[3], 10);
-          if (parsedMajor !== major || parsedMinor !== minor || !Number.isFinite(parsedPatch)) {
-            return null;
-          }
-          return { tag, patch: parsedPatch };
-        })
-        .filter(Boolean)
-        .sort((left, right) => right.patch - left.patch);
-      if (!candidates.length) {
-        console.error("No published release found in series " + series + " for " + repository);
-        process.exit(4);
+      if (!Array.isArray(releases)) {
+        console.error("GitHub releases API returned a non-array listing for " + repository);
+        process.exit(3);
       }
-      process.stdout.write(candidates[0].tag);
+      // Only the selection fields cross the process boundary, keeping the output far below spawnSync limits.
+      // 仅选择字段跨越进程边界，使输出远低于 spawnSync 上限。
+      process.stdout.write(JSON.stringify(releases.map((release) => ({
+        tag_name: String(release.tag_name || ""),
+        draft: release.draft === true,
+        prerelease: release.prerelease === true,
+      }))));
     });
   },
 );
@@ -825,7 +916,7 @@ request.on("error", (error) => {
   process.exit(5);
 });
 `;
-  const result = spawnSync(process.execPath, ["-e", apiScript, repository, series], {
+  const result = spawnSync(process.execPath, ["-e", apiScript, repository], {
     encoding: "utf8",
     windowsHide: true,
   });
@@ -833,11 +924,7 @@ request.on("error", (error) => {
     const message = result.stderr.trim() || result.stdout.trim() || `Unable to resolve latest release for ${repository} series ${series}`;
     throw new Error(message);
   }
-  const resolvedTag = result.stdout.trim();
-  if (!resolvedTag) {
-    throw new Error(`Unable to resolve latest release for ${repository} series ${series}`);
-  }
-  return resolvedTag;
+  return selectLatestReleaseTagForSeries(JSON.parse(result.stdout) as ReleaseListingEntry[], series, repository);
 }
 
 /**
@@ -1701,6 +1788,9 @@ async function installLuaRuntime(runtimeRoot: string, extractDirectory: string, 
  * 将 LuaSkills FFI SDK 归档安装到 runtime include/libs/licenses 目录。
  */
 async function installLuaSkillsFfi(runtimeRoot: string, extractDirectory: string, platform: RuntimePlatformTarget, asset: RuntimeAssetDescriptor): Promise<void> {
+  // The contract check runs before any archive file reaches the runtime root.
+  // 契约检查在任何归档文件进入 runtime root 之前执行。
+  await verifyPackagedContractDigest(extractDirectory, asset);
   await copyDirectoryIfPresent(join(extractDirectory, "include"), resolve(runtimeRoot, "include"));
   await copyDirectoryIfPresent(join(extractDirectory, "lib"), resolve(runtimeRoot, "libs"));
   await copyDirectoryIfPresent(join(extractDirectory, "licenses"), resolve(runtimeRoot, "licenses", "luaskills-ffi"));
@@ -1709,6 +1799,35 @@ async function installLuaSkillsFfi(runtimeRoot: string, extractDirectory: string
     throw new Error(`LuaSkills dynamic library was not found after installing ${asset.asset_name}`);
   }
   asset.installed_path = relativeInstalledPath(runtimeRoot, installedPath);
+}
+
+/**
+ * Require the extracted FFI SDK archive's `contracts/embedded/v1/contract.sha256` to name this SDK's contract digest.
+ * 要求解压后的 FFI SDK 归档中 `contracts/embedded/v1/contract.sha256` 声明本 SDK 的契约摘要。
+ * A mismatch is final: no other tag, older release or retry is attempted.
+ * 不匹配即最终失败：不尝试其他标签、更旧发布或重试。
+ */
+async function verifyPackagedContractDigest(extractDirectory: string, asset: RuntimeAssetDescriptor): Promise<void> {
+  const sidecarPath = join(extractDirectory, "contracts", "embedded", "v1", "contract.sha256");
+  let sidecar: string;
+  try {
+    sidecar = await readFile(sidecarPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`${asset.asset_name} from ${asset.repository}@${asset.version} does not contain contracts/embedded/v1/contract.sha256`);
+    }
+    throw error;
+  }
+  const fields = sidecar.trim().split(/\s+/);
+  if (fields.length !== 2 || !/^[0-9a-f]{64}$/.test(fields[0]) || fields[1] !== "contract.json") {
+    throw new Error(`${asset.asset_name} from ${asset.repository}@${asset.version} has an invalid contracts/embedded/v1/contract.sha256`);
+  }
+  if (fields[0] !== EMBEDDED_CONTRACT_SHA256) {
+    throw new Error(
+      `LuaSkills core ${asset.version} packages embedded contract ${fields[0]}, but this SDK requires ${EMBEDDED_CONTRACT_SHA256}; `
+      + "install a core release whose contract matches this SDK, or upgrade the SDK",
+    );
+  }
 }
 
 

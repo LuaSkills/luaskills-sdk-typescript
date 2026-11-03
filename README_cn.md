@@ -6,7 +6,7 @@ LuaSkills 主仓库：[LuaSkills/luaskills](https://github.com/LuaSkills/luaskil
 
 TypeScript / Node.js SDK，用于通过公共 JSON FFI 接入 LuaSkills 运行时。
 
-此源码对齐已发布的 LuaSkills core `0.8.2`。SQLite 仅由宿主注册和管理；运行时安装器仅安装核心与 Lua 资源。
+此源码对齐 LuaSkills core `0.9` 系列（首个版本 `0.9.0`）。SQLite 仅由宿主注册和管理；运行时安装器仅安装核心与 Lua 资源。
 
 SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正式 skill root、带权限语义的管理调用、skill config、provider callback、宿主工具 callback 与 runtime 资产安装。宿主在常规集成中不需要手写底层 FFI buffer 或 JSON 包络。
 
@@ -100,7 +100,7 @@ npm run test:embedded-candidate -- <绝对archive.tgz路径> <绝对候选库路
 
 ## 安装
 
-0.8.2 SDK 要求 Node.js 24 LTS 或更高版本。
+0.9.0 SDK 要求 Node.js 24 LTS 或更高版本。
 
 ```bash
 npm install @luaskills/sdk
@@ -127,9 +127,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deps/sync_runtime_as
 RUNTIME_ROOT=/opt/luaskills scripts/deps/sync_runtime_assets.sh all
 ```
 
-同步脚本目标支持 `all`、`luaskills`、`lua`，默认核心版本为 `v0.8.2`。CLI 的数据库选项仅支持 `none` 与 `host-callback`；后者只设置 `sqlite_callback_mode: json`，仍需宿主注册。
+同步脚本目标支持 `all`、`luaskills`、`lua`。默认安装 `contracts/embedded/v1/contract.json` 中 `core_series`（`0.9`）的最新已发布核心补丁版本，并要求归档契约摘要一致；`-LuaSkillsVersion` / `LUASKILLS_VERSION` 可固定该系列内的精确标签。CLI 的数据库选项仅支持 `none` 与 `host-callback`；后者只设置 `sqlite_callback_mode: json`，仍需宿主注册。
 
-`install-runtime` 会下载 GitHub Release 资产、校验 `.sha256` 旁路文件、解压原生文件与 Lua runtime 包，并写入：
+`install-runtime` 会下载 GitHub Release 资产、校验 `.sha256` 旁路文件、解压原生文件与 Lua runtime 包，并写入下方清单。未指定 `--luaskills-version` 时安装 `DEFAULT_LUASKILLS_SERIES`（`0.9`）中最新的已发布核心版本；显式标签必须是该系列内的 `vX.Y.Z` 版本。在向 `runtimeRoot` 复制任何内容之前，归档内 `contracts/embedded/v1/contract.sha256` 必须等于 SDK 的 `EMBEDDED_CONTRACT_SHA256`；不一致即失败，不尝试其他发布。
 
 ```text
 runtimeRoot/resources/luaskills-sdk-runtime-manifest.json
@@ -188,12 +188,29 @@ const pythonInstall = LuaSkillsClient.resolveManagedRuntimeInstall({
 
 独立拉取与调试工具通过 `-DistributionRoot` 或 `MANAGED_RUNTIME_DISTRIBUTION_ROOT` 接受同一拆分布局，并通过 `--distribution-root` 与 `--environment-root` 校验两个显式根。
 
-默认情况下，SDK 会把 LuaSkills core 固定到自身对应版本，并从兼容的 `0.1` 协议线中自动解析最新已发布的 runtime packages patch 版本。
+### 只读运行时根
+
+默认情况下 `temp_dir` 与 `download_cache_root` 从 `runtimeRoot` 推导（`temp` 与 `temp/downloads`）。宿主若以只读方式安装 `runtimeRoot`，应设置 `preserve_host_writable_dirs: true` 并显式传入两个路径；此时两者均为必填，不会以推导值代替。宿主创建 `temp_dir`；引擎在首次需要时创建下载缓存。示例见 `examples/host-writable-dirs.mjs`。
+
+```ts
+const client = LuaSkillsClient.create({
+  runtimeRoot: "C:/Program Files/Host/lua_runtime",
+  hostOptions: {
+    preserve_host_writable_dirs: true,
+    temp_dir: "C:/Users/me/.host/cache/luaskills-temp",
+    download_cache_root: "C:/Users/me/.host/cache/luaskills-downloads",
+  },
+});
+```
+
+SDK 安装自身系列中最新的已发布核心补丁版本，并以同样方式从兼容的 `0.1` 协议线解析 runtime packages。
 
 ## 版本对齐
 
-- 尽量让 SDK 与 LuaSkills core 保持同一条当前发布版本线。
-- 当前 SDK 默认指向 LuaSkills core 标签 `v0.8.2`。
+- SDK 0.9.x 适用于嵌入式契约摘要与 SDK `EMBEDDED_CONTRACT_SHA256` 一致的每个 LuaSkills core 0.9.x 补丁版本；核心补丁版本保持契约字节不变，因此无需发布新 SDK。
+- 安装器选择 `DEFAULT_LUASKILLS_SERIES`（`0.9`）中最新的已发布核心补丁版本，包内契约摘要不一致即拒绝，不回退到更旧的补丁版本。显式核心标签必须属于该系列。
+- 嵌入式兼容检查接受契约摘要、协议、ABI 与描述版本一致的任意 `0.9.x` 核心版本。
+- 新的核心次版本系列会改变契约，需要发布新的 SDK 次版本。
 - runtime packages 与 native deps 仍然来自拆分后的 `LuaSkills/luaskills-packages` 及相关发布资产。
 - SDK 默认 host options 传入 `runtime_root`、两个空的受管根覆盖槽与完整稳定的 `managed_runtime_config`；宿主未显式覆盖时，LuaSkills 会推导固定数据布局。
 - 宿主工具直接放在 `runtime_root/bin`，不再放到 `runtime_root/bin/tools`。
@@ -314,6 +331,7 @@ npm run example:lifecycle
 npm run example:runtime-lease
 npm run example:runtime-lease
 npm run example:provider-callback
+npm run example:host-writable-dirs
 ```
 
 query、lifecycle 与持久 runtime-lease 示例使用内置夹具 skill：`examples/fixture-runtime/user_skills/demo-standard-ffi-skill`。请先把 runtime 资产安装到该 root：
