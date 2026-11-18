@@ -8,7 +8,7 @@ TypeScript / Node.js SDK for integrating the LuaSkills runtime through the publi
 
 This source aligns with the LuaSkills core `0.9` series (first release `0.9.0`). SQLite is registered and managed by the host; runtime installers fetch only the core and Lua assets.
 
-SDK `0.9.1` is verified against LuaSkills core `v0.9.1`. The public FFI exposes skill discovery and execution through `list_entries` and `call_skill`. Legacy package-help calls report retirement with this core. Bundled guide registration and implicit dispatch are currently available through the Rust API.
+SDK `0.9.2` is verified against LuaSkills core `v0.9.1`. The public FFI exposes skill discovery and execution through `list_entries` and `call_skill`. Legacy package-help calls report retirement with this core. Bundled guide registration and implicit dispatch are currently available through the Rust API.
 
 The SDK wraps native library loading, JSON FFI buffers, engine lifecycle, formal skill roots, authority-aware management calls, skill config, provider callbacks, host-tool callbacks, and runtime asset installation. Hosts should not need to hand-write low-level FFI buffers or JSON envelopes for normal integration.
 
@@ -102,7 +102,7 @@ Run the example directly with `npm run example:embedded-candidate -- <absolute-c
 
 ## Installation
 
-The 0.9.1 SDK requires Node.js 24 LTS or newer.
+The 0.9.2 SDK requires Node.js 24 LTS or newer.
 
 ```bash
 npm install @luaskills/sdk
@@ -503,7 +503,6 @@ Query APIs default to `Authority.DelegatedTool`, so ROOT skills are hidden from 
 
 ```ts
 client.listEntries();
-client.listSkillHelp();
 client.isSkill("some-root-tool");
 ```
 
@@ -639,7 +638,7 @@ The SDK covers the public JSON FFI surface:
 - version / describe
 - engine_new / engine_free
 - load_from_roots / reload_from_roots
-- list_entries / list_skill_help / render_skill_help_detail
+- list_entries
 - prompt_argument_completions / is_skill / skill_name_for_tool
 - call_skill / run_lua
 - skill_config list / describe / validate / get / batch set / CAS delete / refresh / event polling

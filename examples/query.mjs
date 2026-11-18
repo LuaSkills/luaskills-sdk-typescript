@@ -52,11 +52,6 @@ try {
   // 当前 runtime 暴露的补全值。
   const completions = client.promptArgumentCompletions(toolName, "note", Authority.DelegatedTool) ?? [];
   console.log("Prompt completion count:", completions.length);
-
-  // Help descriptors visible to delegated tools.
-  // 委托工具可见的帮助描述。
-  const help = client.listSkillHelp(Authority.DelegatedTool);
-  console.log("Help tree count:", help.length);
 } finally {
   client.close();
 }

@@ -8,7 +8,7 @@ TypeScript / Node.js SDK，用于通过公共 JSON FFI 接入 LuaSkills 运行�
 
 此源码对齐 LuaSkills core `0.9` 系列（首个版本 `0.9.0`）。SQLite 仅由宿主注册和管理；运行时安装器仅安装核心与 Lua 资源。
 
-SDK `0.9.1` 已针对 LuaSkills core `v0.9.1` 验证。公开 FFI 的 `list_entries` 和 `call_skill` 可发现和执行技能。旧包级帮助接口在该核心版本返回停用错误。随包指南注册及隐式调用入口目前由 Rust API 提供。
+SDK `0.9.2` 已针对 LuaSkills core `v0.9.1` 验证。公开 FFI 的 `list_entries` 和 `call_skill` 可发现和执行技能。旧包级帮助接口在该核心版本返回停用错误。随包指南注册及隐式调用入口目前由 Rust API 提供。
 
 SDK 封装了原生动态库加载、JSON FFI buffer、engine 生命周期、正式 skill root、带权限语义的管理调用、skill config、provider callback、宿主工具 callback 与 runtime 资产安装。宿主在常规集成中不需要手写底层 FFI buffer 或 JSON 包络。
 
@@ -102,7 +102,7 @@ npm run test:embedded-candidate -- <绝对archive.tgz路径> <绝对候选库路
 
 ## 安装
 
-0.9.1 SDK 要求 Node.js 24 LTS 或更高版本。
+0.9.2 SDK 要求 Node.js 24 LTS 或更高版本。
 
 ```bash
 npm install @luaskills/sdk
@@ -503,7 +503,6 @@ const llmResult = client.runLua('return vulcan.models.llm("system", "user")');
 
 ```ts
 client.listEntries();
-client.listSkillHelp();
 client.isSkill("some-root-tool");
 ```
 
@@ -639,7 +638,7 @@ SDK 覆盖公共 JSON FFI 主要入口：
 - version / describe
 - engine_new / engine_free
 - load_from_roots / reload_from_roots
-- list_entries / list_skill_help / render_skill_help_detail
+- list_entries
 - prompt_argument_completions / is_skill / skill_name_for_tool
 - call_skill / run_lua
 - skill_config list / describe / validate / get / 批量 set / CAS delete / refresh / 事件轮询
